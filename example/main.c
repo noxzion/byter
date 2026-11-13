@@ -50,7 +50,7 @@ static int valid_memory_map(const struct byter_memmap_response *map) {
 static int valid_executable_address(const struct byter_executable_address_response *address,
                                    const struct byter_memmap_response *map) {
     if (!address || address->revision != 0 || !address->physical_base ||
-        address->physical_base != address->virtual_base || !map || !map->entries)
+        address->virtual_base < 0xffff000000000000ULL || !map || !map->entries)
         return 0;
 
     for (uint64_t i = 0; i < map->entry_count; ++i) {

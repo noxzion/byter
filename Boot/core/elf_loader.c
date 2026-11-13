@@ -1,5 +1,6 @@
 #include "byter.h"
 #include "../platform/a059/framebuffer.h"
+#include "../arch/aarch64/page_tables.h"
 
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -17,6 +18,7 @@ typedef unsigned long long u64;
 #define STACK_SIZE 0x30000ULL
 
 typedef struct { u64 base, length; } range;
+typedef struct { u64 entry, ttbr0, ttbr1, tcr; } boot_context;
 typedef struct {
     u64 address, size, width, height, pitch;
     u8 red_size, red_shift, green_size, green_shift, blue_size, blue_shift;
@@ -276,6 +278,16 @@ static int in_memory(range *memory, u32 count, range candidate) {
 
 static int overlaps(range a, range b) {
     return a.base < b.base + b.length && b.base < a.base + a.length;
+}
+
+static int page_aligned_range(range input, range *output) {
+    if (!input.length || input.base > ~0ULL - input.length) return 0;
+    u64 end = input.base + input.length;
+    if (end > ~0ULL - 0xfff) return 0;
+    output->base = input.base & ~0xfffULL;
+    u64 aligned_end = (end + 0xfff) & ~0xfffULL;
+    output->length = aligned_end - output->base;
+    return output->length != 0;
 }
 
 static int normalize_memory(range *memory, u32 *count) {
@@ -569,25 +581,50 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     elf_header *eh;
     elf_program *ph;
     if (!valid_elf(elf, elf_size, &eh, &ph)) return 0;
-    range segments[MAX_PHDRS]; u32 segment_count = 0;
-    u64 low = ~0ULL, high = 0, total_mem = 0;
+    range segments[MAX_PHDRS], virtual_segments[MAX_PHDRS];
+    range physical_page_ranges[MAX_PHDRS], virtual_page_ranges[MAX_PHDRS];
+    struct byter_aarch64_load_segment page_table_segments[MAX_PHDRS];
+    u32 segment_count = 0;
+    u64 low = ~0ULL, high = 0, virtual_low = ~0ULL, total_mem = 0;
+    u64 load_bias = 0;
     int entry_ok = 0;
     for (u32 i = 0; i < eh->phnum; ++i) {
         elf_program *p = &ph[i];
         if (p->type != 1 || !p->memsz) continue;
         if (p->filesz > p->memsz || p->offset > elf_size || p->filesz > elf_size - p->offset ||
-            p->paddr != p->vaddr || p->paddr > ~0ULL - p->memsz || p->memsz > MAX_ELF_MEMORY - total_mem ||
+            p->paddr > ~0ULL - p->memsz || p->vaddr < p->paddr || p->vaddr > ~0ULL - p->memsz ||
+            p->memsz > MAX_ELF_MEMORY - total_mem ||
             (p->align > 1 && ((p->align & (p->align - 1)) || ((p->vaddr - p->offset) & (p->align - 1))))) return 0;
-        range r = {p->paddr, p->memsz};
-        if (!in_memory(memory, memory_count, r) || overlaps(r, (range){(u64)shim, shim_size}) ||
+        range r = {p->paddr, p->memsz}, vr = {p->vaddr, p->memsz};
+        range physical_page, virtual_page;
+        if ((p->paddr & 0xfff) != (p->vaddr & 0xfff) ||
+            !page_aligned_range(r, &physical_page) || !page_aligned_range(vr, &virtual_page) ||
+            p->vaddr < 0xffff000000000000ULL || !in_memory(memory, memory_count, r) ||
+            !in_memory(memory, memory_count, (range){(u64)shim, shim_size}) ||
+            !in_memory(memory, memory_count, (range){(u64)dtb, dtb_size}) ||
+            overlaps(r, (range){(u64)shim, shim_size}) ||
             overlaps(r, (range){(u64)dtb, dtb_size})) return 0;
+        u64 segment_bias = p->vaddr - p->paddr;
+        if (segment_count && segment_bias != load_bias) return 0;
+        load_bias = segment_bias;
         for (u32 j = 0; j < reserved_count; ++j) if (overlaps(r, reserved[j])) return 0;
-        for (u32 j = 0; j < segment_count; ++j) if (overlaps(r, segments[j])) return 0;
-        segments[segment_count++] = r;
+        for (u32 j = 0; j < segment_count; ++j)
+            if (overlaps(physical_page, physical_page_ranges[j]) ||
+                overlaps(virtual_page, virtual_page_ranges[j])) return 0;
+        segments[segment_count] = r;
+        virtual_segments[segment_count] = vr;
+        physical_page_ranges[segment_count] = physical_page;
+        virtual_page_ranges[segment_count] = virtual_page;
+        page_table_segments[segment_count] = (struct byter_aarch64_load_segment){
+            .physical_base = p->paddr, .virtual_base = p->vaddr,
+            .length = p->memsz, .flags = p->flags
+        };
+        ++segment_count;
         total_mem += p->memsz;
         if (r.base < low) low = r.base;
         if (r.base + r.length > high) high = r.base + r.length;
-        if ((p->flags & 1) && eh->entry >= r.base && eh->entry - r.base < r.length) entry_ok = 1;
+        if (vr.base < virtual_low) virtual_low = vr.base;
+        if ((p->flags & 1) && eh->entry >= vr.base && eh->entry - vr.base < vr.length) entry_ok = 1;
     }
     if (!segment_count || !entry_ok || high <= low) return 0;
 
@@ -629,7 +666,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
         .revision = 0, .entry_count = memmap_count, .entries = memmap_entry_pointers
     };
     *executable_address_response = (struct byter_executable_address_response){
-        .revision = 0, .physical_base = low, .virtual_base = low
+        .revision = 0, .physical_base = low, .virtual_base = virtual_low
     };
     *bootloader_info = (struct byter_bootloader_info_response){
         .revision = 0, .name = (char *)byter_name, .version = (char *)byter_version
@@ -666,5 +703,14 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
 
     resolve_requests(segments, segment_count, bootloader_info, dtb_response,
                      framebuffer_result, memmap_response, executable_address_response);
-    return eh->entry;
+    struct byter_aarch64_range page_table_memory[MAX_RANGES];
+    for (u32 i = 0; i < memory_count; ++i)
+        page_table_memory[i] = (struct byter_aarch64_range){memory[i].base, memory[i].length};
+    struct byter_aarch64_page_tables page_tables;
+    if (!byter_aarch64_build_page_tables(shim, shim_size, page_table_memory, memory_count,
+            (struct byter_aarch64_range){framebuffer_range.base, framebuffer_range.length},
+            has_framebuffer, page_table_segments, segment_count, &page_tables)) return 0;
+    boot_context *context = (boot_context *)(handoff + HANDOFF_SIZE - sizeof(*context));
+    *context = (boot_context){eh->entry, page_tables.ttbr0, page_tables.ttbr1, page_tables.tcr};
+    return (u64)context;
 }

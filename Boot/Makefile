@@ -22,14 +22,17 @@ $(OUT):
 $(OUT)/entry.o: $(ARCH)/entry.S | $(OUT)
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-$(OUT)/elf_loader.o: $(CORE)/elf_loader.c include/byter.h | $(OUT)
+$(OUT)/elf_loader.o: $(CORE)/elf_loader.c include/byter.h $(ARCH)/page_tables.h | $(OUT)
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 $(OUT)/a059_framebuffer.o: platform/a059/framebuffer.c platform/a059/framebuffer.h include/byter.h | $(OUT)
 	$(CLANG) $(CFLAGS) -Iplatform/a059 -c $< -o $@
 
-$(OUT)/boot-shim.elf: $(OUT)/entry.o $(OUT)/elf_loader.o $(OUT)/a059_framebuffer.o $(ARCH)/image.ld
-	$(LLD) -T $(ARCH)/image.ld --build-id=none --no-undefined $(OUT)/entry.o $(OUT)/elf_loader.o $(OUT)/a059_framebuffer.o -o $@
+$(OUT)/page_tables.o: $(ARCH)/page_tables.c $(ARCH)/page_tables.h | $(OUT)
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+$(OUT)/boot-shim.elf: $(OUT)/entry.o $(OUT)/elf_loader.o $(OUT)/a059_framebuffer.o $(OUT)/page_tables.o $(ARCH)/image.ld
+	$(LLD) -T $(ARCH)/image.ld --build-id=none --no-undefined $(OUT)/entry.o $(OUT)/elf_loader.o $(OUT)/a059_framebuffer.o $(OUT)/page_tables.o -o $@
 
 $(OUT)/boot-shim.bin: $(OUT)/boot-shim.elf
 	$(OBJCOPY) -O binary $< $@

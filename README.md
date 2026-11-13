@@ -43,7 +43,8 @@ make boot ELF=/путь/к/моему-ядру.elf
 - `tools/` — упаковка Android boot image и инструменты разработки.
 - [ROADMAP.md](ROADMAP.md) — этапы развития и критерии готовности.
 
-Shim получает framebuffer из DTB или A059-профиля и отвечает на запросы
-framebuffer, DTB, bootloader info и memory map. Карта описывает RAM и известные
-резервации из DTB, включая области shim, ядра и framebuffer. Paging, HHDM и
-полное соответствие Limine ABI пока не реализованы.
+Shim включает 4 KiB page tables перед входом в ядро: RAM и boot data остаются
+доступны по identity map, а ELF-сегменты отображаются по своим виртуальным
+адресам с правами из `PT_LOAD`. Shim отвечает на запросы framebuffer, DTB,
+bootloader info, memory map и executable address. HHDM и полное соответствие
+Limine ABI пока не реализованы.

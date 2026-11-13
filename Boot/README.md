@@ -4,7 +4,8 @@
 Android boot image, переданного командой `fastboot boot`.
 
 ```text
-arch/aarch64/entry.S       ARM64 Image entry и переход к ядру
+arch/aarch64/entry.S       ARM64 Image entry и переход к ядру на EL1
+arch/aarch64/page_tables.c таблицы страниц и права PT_LOAD
 arch/aarch64/image.ld      linker script shim
 core/elf_loader.c          проверка и загрузка ELF, ответы Byter ABI
 include/byter.h           публичные структуры и ID Byter ABI
@@ -23,4 +24,6 @@ Framebuffer shim получает из DTB-узла `simple-framebuffer`. Есл
 `platform/a059/framebuffer.c`. Shim отвечает на bootloader-info, DTB,
 framebuffer и memory-map запросы. Карта памяти строится по RAM и known
 reservations из DTB, с отдельными типами для областей загрузчика, ELF-ядра и
-framebuffer. Это пока не полный Limine memory map: paging и HHDM не реализованы.
+framebuffer. Shim включает MMU и передаёт ядру identity map для RAM и boot data,
+а сегменты ядра отображает по ELF VMA с правами `PT_LOAD`. HHDM и полный Limine
+memory map пока не реализованы.

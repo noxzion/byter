@@ -19,9 +19,10 @@ claim full Limine Boot Protocol compatibility.
   magic, the shim clears `response` first; unknown IDs and unsupported request
   revisions therefore remain `NULL`.
 - Response objects are revision 0. Pointers are direct address values with no
-  HHDM offset. The shim does not establish page tables, so pointer access relies
-  on the inherited ARM64 translation state; the example verifies the current
-  A059 framebuffer and memory-map path.
+  HHDM offset. The shim establishes 4 KiB page tables before entering the
+  kernel: RAM, shim, DTB, handoff data, and framebuffer remain identity-mapped;
+  ELF segments also receive higher-half mappings with permissions derived from
+  `PT_LOAD` flags.
 
 ## Implemented requests
 
@@ -31,7 +32,13 @@ claim full Limine Boot Protocol compatibility.
 | `BYTER_DTB_REQUEST_ID` | 0 | 0 | `dtb_ptr` | Original DTB pointer received from ABL. The response does not provide a DTB size. |
 | `BYTER_FRAMEBUFFER_REQUEST_ID` | 0 | 0 | One framebuffer pointer and its address, dimensions, pitch, bpp, RGB masks, and memory model | Parsed from a DTB `simple-framebuffer` node; otherwise the A059 fallback profile. If no framebuffer is available, `response` remains `NULL`. EDID and video modes are not provided. |
 | `BYTER_MEMMAP_REQUEST_ID` | 0 | 0 | `entry_count`, pointer array of `{base, length, type}` entries | RAM ranges from DTB, split around known reservations, shim, DTB, ELF `PT_LOAD` ranges, and framebuffer. Limited to 512 output entries; non-RAM address space and unrecognized device ranges are omitted. |
-| `BYTER_EXECUTABLE_ADDRESS_REQUEST_ID` | 0 | 0 | `physical_base`, `virtual_base` | Lowest loaded `PT_LOAD` base. They are equal because the loader currently requires `p_paddr == p_vaddr`; no relocation or separate VMA/PADDR mapping is supported yet. |
+| `BYTER_EXECUTABLE_ADDRESS_REQUEST_ID` | 0 | 0 | `physical_base`, `virtual_base` | Lowest loaded `PT_LOAD` physical and virtual bases. The loader accepts AArch64 `ET_EXEC` segments with a uniform load bias, page-compatible addresses, and non-overlapping mappings; the example uses a higher-half VMA. |
+
+The current handoff enters at EL1 with the MMU and caches enabled, using a
+4 KiB translation granule and 48-bit virtual addressing. This initial mapping
+is not an HHDM: RAM and boot data use identity pointers, while the kernel image
+has its ELF virtual mappings. The shim expects the Android arm64 entry
+conditions (MMU and data cache off) and stops if they are not met.
 
 ## Declared but not implemented
 
