@@ -489,7 +489,8 @@ static void resolve_requests(range *segments, u32 count,
                              struct byter_bootloader_info_response *bootloader_info,
                              struct byter_dtb_response *dtb,
                              struct byter_framebuffer_response *framebuffer,
-                             struct byter_memmap_response *memmap) {
+                             struct byter_memmap_response *memmap,
+                             struct byter_executable_address_response *executable_address) {
     u64 window_start, window_end;
     find_request_window(segments, count, &window_start, &window_end);
     if (window_start >= window_end) return;
@@ -524,6 +525,8 @@ static void resolve_requests(range *segments, u32 count,
                     *response = (u64)framebuffer;
                 else if (has_id(id, (const u64[])BYTER_MEMMAP_REQUEST_ID))
                     *response = (u64)memmap;
+                else if (has_id(id, (const u64[])BYTER_EXECUTABLE_ADDRESS_REQUEST_ID))
+                    *response = (u64)executable_address;
             }
             if (end - address < sizeof(u64)) break;
             address += sizeof(u64);
@@ -610,7 +613,8 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     struct byter_dtb_response *dtb_response = (void *)(bootloader_info + 1);
     struct byter_framebuffer_response *framebuffer_response = (void *)(dtb_response + 1);
     struct byter_memmap_response *memmap_response = (void *)(framebuffer_response + 1);
-    struct byter_framebuffer *framebuffer = (void *)(memmap_response + 1);
+    struct byter_executable_address_response *executable_address_response = (void *)(memmap_response + 1);
+    struct byter_framebuffer *framebuffer = (void *)(executable_address_response + 1);
     struct byter_framebuffer **framebuffers = (void *)(framebuffer + 1);
     struct byter_memmap_entry *memmap_entries = (void *)(framebuffers + 1);
     struct byter_memmap_entry **memmap_entry_pointers = (void *)(memmap_entries + MAX_OUT_RANGES);
@@ -623,6 +627,9 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     for (u32 i = 0; i < memmap_count; ++i) memmap_entry_pointers[i] = &memmap_entries[i];
     *memmap_response = (struct byter_memmap_response){
         .revision = 0, .entry_count = memmap_count, .entries = memmap_entry_pointers
+    };
+    *executable_address_response = (struct byter_executable_address_response){
+        .revision = 0, .physical_base = low, .virtual_base = low
     };
     *bootloader_info = (struct byter_bootloader_info_response){
         .revision = 0, .name = (char *)byter_name, .version = (char *)byter_version
@@ -658,6 +665,6 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     }
 
     resolve_requests(segments, segment_count, bootloader_info, dtb_response,
-                     framebuffer_result, memmap_response);
+                     framebuffer_result, memmap_response, executable_address_response);
     return eh->entry;
 }

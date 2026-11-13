@@ -16,7 +16,8 @@ include/byter.h           публичные структуры и ID Byter ABI
 `Boot/build/byter-boot.img`. `make boot` дополнительно запускает его через
 Fastboot. Передаётся только временный RAM-образ, разделы не прошиваются.
 
-Пример ядра в `example/main.c` запрашивает framebuffer и рисует цветной квадрат.
+Пример ядра в `example/main.c` проверяет ответы framebuffer, memory map и
+executable address, затем рисует цветной квадрат.
 Framebuffer shim получает из DTB-узла `simple-framebuffer`. Если ABL его не
 передаёт, используется изолированный проверенный профиль A059 в
 `platform/a059/framebuffer.c`. Shim отвечает на bootloader-info, DTB,

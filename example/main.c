@@ -17,6 +17,11 @@ static volatile struct byter_memmap_request memmap_request BYTER_REQUEST = {
     .revision = 0,
 };
 
+static volatile struct byter_executable_address_request executable_address_request BYTER_REQUEST = {
+    .id = BYTER_EXECUTABLE_ADDRESS_REQUEST_ID,
+    .revision = 0,
+};
+
 static void wait_forever(void) {
     for (;;) __asm__ volatile("wfe");
 }
@@ -42,6 +47,22 @@ static int valid_memory_map(const struct byter_memmap_response *map) {
     return has_usable && has_bootloader && has_kernel;
 }
 
+static int valid_executable_address(const struct byter_executable_address_response *address,
+                                   const struct byter_memmap_response *map) {
+    if (!address || address->revision != 0 || !address->physical_base ||
+        address->physical_base != address->virtual_base || !map || !map->entries)
+        return 0;
+
+    for (uint64_t i = 0; i < map->entry_count; ++i) {
+        const struct byter_memmap_entry *entry = map->entries[i];
+        if (entry->type == BYTER_MEMMAP_EXECUTABLE_AND_MODULES &&
+            address->physical_base >= entry->base &&
+            address->physical_base - entry->base < entry->length)
+            return 1;
+    }
+    return 0;
+}
+
 static uint32_t rgb(const struct byter_framebuffer *fb, uint8_t red, uint8_t green, uint8_t blue) {
     return ((uint32_t)red << fb->red_mask_shift) |
            ((uint32_t)green << fb->green_mask_shift) |
@@ -49,7 +70,10 @@ static uint32_t rgb(const struct byter_framebuffer *fb, uint8_t red, uint8_t gre
 }
 
 void _start(void) {
-    if (!valid_memory_map(memmap_request.response)) wait_forever();
+    struct byter_memmap_response *memmap = memmap_request.response;
+    if (!valid_memory_map(memmap) ||
+        !valid_executable_address(executable_address_request.response, memmap))
+        wait_forever();
 
     struct byter_framebuffer_response *response = framebuffer_request.response;
     if (!response || !response->framebuffer_count || !response->framebuffers ||

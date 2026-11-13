@@ -23,8 +23,9 @@ make boot     # собрать и запустить в RAM
 ```
 
 `example/` — демонстрационное ядро загрузчика, а не основная часть Byter. Сейчас
-оно запрашивает framebuffer по Byter ABI и рисует один цветной квадрат. Чтобы
-изменить пример, открой `example/main.c` и выполни `make boot`.
+оно проверяет ответы framebuffer, memory map и executable address по Byter ABI,
+затем рисует один цветной квадрат. Чтобы изменить пример, открой
+`example/main.c` и выполни `make boot`.
 
 Для своего ELF64 AArch64 `ET_EXEC`:
 

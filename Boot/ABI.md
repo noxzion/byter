@@ -31,6 +31,7 @@ claim full Limine Boot Protocol compatibility.
 | `BYTER_DTB_REQUEST_ID` | 0 | 0 | `dtb_ptr` | Original DTB pointer received from ABL. The response does not provide a DTB size. |
 | `BYTER_FRAMEBUFFER_REQUEST_ID` | 0 | 0 | One framebuffer pointer and its address, dimensions, pitch, bpp, RGB masks, and memory model | Parsed from a DTB `simple-framebuffer` node; otherwise the A059 fallback profile. If no framebuffer is available, `response` remains `NULL`. EDID and video modes are not provided. |
 | `BYTER_MEMMAP_REQUEST_ID` | 0 | 0 | `entry_count`, pointer array of `{base, length, type}` entries | RAM ranges from DTB, split around known reservations, shim, DTB, ELF `PT_LOAD` ranges, and framebuffer. Limited to 512 output entries; non-RAM address space and unrecognized device ranges are omitted. |
+| `BYTER_EXECUTABLE_ADDRESS_REQUEST_ID` | 0 | 0 | `physical_base`, `virtual_base` | Lowest loaded `PT_LOAD` base. They are equal because the loader currently requires `p_paddr == p_vaddr`; no relocation or separate VMA/PADDR mapping is supported yet. |
 
 ## Declared but not implemented
 
@@ -44,9 +45,8 @@ their responses. Requests using them receive `response == NULL`:
 | `BYTER_MP_REQUEST_ID` | `BYTER_ENTRY_POINT_REQUEST_ID` | `BYTER_EXECUTABLE_FILE_REQUEST_ID` |
 | `BYTER_MODULE_REQUEST_ID` | `BYTER_RSDP_REQUEST_ID` | `BYTER_SMBIOS_REQUEST_ID` |
 | `BYTER_EFI_SYSTEM_TABLE_REQUEST_ID` | `BYTER_TPM_EVENT_LOG_REQUEST_ID` | `BYTER_EFI_MEMMAP_REQUEST_ID` |
-| `BYTER_DATE_AT_BOOT_REQUEST_ID` | `BYTER_EXECUTABLE_ADDRESS_REQUEST_ID` | `BYTER_RISCV_BSP_HARTID_REQUEST_ID` |
-| `BYTER_BOOTLOADER_PERFORMANCE_REQUEST_ID` | `BYTER_X86_64_KEEP_IOMMU_REQUEST_ID` | `BYTER_TSC_FREQUENCY_REQUEST_ID` |
-| `BYTER_ENTROPY_REQUEST_ID` |  |  |
+| `BYTER_DATE_AT_BOOT_REQUEST_ID` | `BYTER_RISCV_BSP_HARTID_REQUEST_ID` | `BYTER_BOOTLOADER_PERFORMANCE_REQUEST_ID` |
+| `BYTER_X86_64_KEEP_IOMMU_REQUEST_ID` | `BYTER_TSC_FREQUENCY_REQUEST_ID` | `BYTER_ENTROPY_REQUEST_ID` |
 
 This list is intentionally based on the IDs currently declared in the public
 header. Adding a response requires implementing its data source and handoff
