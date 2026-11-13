@@ -1,0 +1,84 @@
+#include "byter.h"
+
+#define BYTER_REQUEST __attribute__((used, section(".byter_requests"), aligned(8)))
+
+static volatile uint64_t request_start[4]
+    __attribute__((used, section(".byter_requests_start"), aligned(8))) = BYTER_REQUESTS_START_MARKER;
+static volatile uint64_t request_end[2]
+    __attribute__((used, section(".byter_requests_end"), aligned(8))) = BYTER_REQUESTS_END_MARKER;
+
+static volatile struct byter_framebuffer_request framebuffer_request BYTER_REQUEST = {
+    .id = BYTER_FRAMEBUFFER_REQUEST_ID,
+    .revision = 0,
+};
+
+static volatile struct byter_memmap_request memmap_request BYTER_REQUEST = {
+    .id = BYTER_MEMMAP_REQUEST_ID,
+    .revision = 0,
+};
+
+static void wait_forever(void) {
+    for (;;) __asm__ volatile("wfe");
+}
+
+static int valid_memory_map(const struct byter_memmap_response *map) {
+    if (!map || !map->entries || !map->entry_count || map->entry_count > 512) return 0;
+
+    int has_usable = 0;
+    int has_bootloader = 0;
+    int has_kernel = 0;
+    uint64_t previous_end = 0;
+    for (uint64_t i = 0; i < map->entry_count; ++i) {
+        const struct byter_memmap_entry *entry = map->entries[i];
+        if (!entry || !entry->length || entry->base > UINT64_MAX - entry->length ||
+            entry->base < previous_end || entry->type > BYTER_MEMMAP_RESERVED_MAPPED)
+            return 0;
+
+        previous_end = entry->base + entry->length;
+        if (entry->type == BYTER_MEMMAP_USABLE) has_usable = 1;
+        if (entry->type == BYTER_MEMMAP_BOOTLOADER_RECLAIMABLE) has_bootloader = 1;
+        if (entry->type == BYTER_MEMMAP_EXECUTABLE_AND_MODULES) has_kernel = 1;
+    }
+    return has_usable && has_bootloader && has_kernel;
+}
+
+static uint32_t rgb(const struct byter_framebuffer *fb, uint8_t red, uint8_t green, uint8_t blue) {
+    return ((uint32_t)red << fb->red_mask_shift) |
+           ((uint32_t)green << fb->green_mask_shift) |
+           ((uint32_t)blue << fb->blue_mask_shift);
+}
+
+void _start(void) {
+    if (!valid_memory_map(memmap_request.response)) wait_forever();
+
+    struct byter_framebuffer_response *response = framebuffer_request.response;
+    if (!response || !response->framebuffer_count || !response->framebuffers ||
+        !response->framebuffers[0]) wait_forever();
+
+    struct byter_framebuffer *fb = response->framebuffers[0];
+    if (!fb->address || fb->memory_model != BYTER_FRAMEBUFFER_RGB || fb->bpp != 32 ||
+        !fb->width || !fb->height || fb->width > 16384 || fb->height > 16384 ||
+        fb->pitch < fb->width * 4 || fb->pitch % 4 ||
+        fb->red_mask_size != 8 || fb->green_mask_size != 8 || fb->blue_mask_size != 8 ||
+        fb->red_mask_shift > 24 || fb->green_mask_shift > 24 || fb->blue_mask_shift > 24)
+        wait_forever();
+
+    volatile uint32_t *pixels = fb->address;
+    uint32_t stride = (uint32_t)(fb->pitch / 4);
+    for (uint32_t y = 0; y < fb->height; ++y)
+        for (uint32_t x = 0; x < fb->width; ++x)
+            pixels[y * stride + x] = rgb(fb, 16, 24, 32);
+
+    uint32_t side = fb->width < fb->height ? (uint32_t)fb->width : (uint32_t)fb->height;
+    if (side > 160) side = 160;
+    uint32_t left = ((uint32_t)fb->width - side) / 2;
+    uint32_t top = ((uint32_t)fb->height - side) / 2;
+    uint32_t square_color = rgb(fb, 0xE8, 0x45, 0x75);
+
+    for (uint32_t y = 0; y < side; ++y)
+        for (uint32_t x = 0; x < side; ++x)
+            pixels[(top + y) * stride + left + x] = square_color;
+
+    __asm__ volatile("dsb sy" ::: "memory");
+    wait_forever();
+}

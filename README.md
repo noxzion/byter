@@ -1,0 +1,47 @@
+# Byter
+
+**А что, если бы Limine был на телефонах?** Byter — эксперимент над этим
+вопросом: загрузчик в духе Limine для Android-телефонов, сначала для Nothing
+Phone (3a), с понятным протоколом и простой сборкой собственного ядра.
+
+Сейчас цепочка запускается из RAM через `fastboot boot`:
+
+```text
+Android boot image → ARM64 shim → AArch64 ELF kernel
+```
+
+Ничего не прошивается в разделы телефона.
+
+## Быстрый старт
+
+Нужны `clang`, `ld.lld`, `llvm-objcopy`, `mkbootimg`, `fastboot` и `python3`.
+
+```sh
+make doctor   # проверить инструменты
+make          # собрать Boot/build/byter-boot.img
+make boot     # собрать и запустить в RAM
+```
+
+`example/` — демонстрационное ядро загрузчика, а не основная часть Byter. Сейчас
+оно запрашивает framebuffer по Byter ABI и рисует один цветной квадрат. Чтобы
+изменить пример, открой `example/main.c` и выполни `make boot`.
+
+Для своего ELF64 AArch64 `ET_EXEC`:
+
+```sh
+make boot ELF=/путь/к/моему-ядру.elf
+```
+
+## Структура
+
+- `Boot/arch/aarch64/` — ARM64 Image entry и linker script shim.
+- `Boot/core/` — загрузчик ELF и обработка запросов Limine.
+- `Boot/include/byter.h` — Byter-имена для структур и ID Limine-совместимого wire ABI.
+- `example/` — минимальный пример ядра на Byter ABI.
+- `tools/` — упаковка Android boot image и инструменты разработки.
+- [ROADMAP.md](ROADMAP.md) — этапы развития и критерии готовности.
+
+Shim получает framebuffer из DTB или A059-профиля и отвечает на запросы
+framebuffer, DTB, bootloader info и memory map. Карта описывает RAM и известные
+резервации из DTB, включая области shim, ядра и framebuffer. Paging, HHDM и
+полное соответствие Limine ABI пока не реализованы.
