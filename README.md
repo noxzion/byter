@@ -37,6 +37,7 @@ make boot ELF=/путь/к/моему-ядру.elf
 - `Boot/arch/aarch64/` — ARM64 Image entry и linker script shim.
 - `Boot/core/` — загрузчик ELF и обработка запросов Limine.
 - `Boot/include/byter.h` — Byter-имена для структур и ID Limine-совместимого wire ABI.
+- [`Boot/ABI.md`](Boot/ABI.md) — поддерживаемые запросы, ревизии и ограничения ABI.
 - `example/` — минимальный пример ядра на Byter ABI.
 - `tools/` — упаковка Android boot image и инструменты разработки.
 - [ROADMAP.md](ROADMAP.md) — этапы развития и критерии готовности.
