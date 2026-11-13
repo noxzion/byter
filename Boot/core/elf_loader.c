@@ -436,27 +436,97 @@ static int has_id(const u64 *id, const u64 expected[4]) {
            id[2] == expected[2] && id[3] == expected[3];
 }
 
+static int matches_words(u64 address, const u64 *words, u32 count, u64 end) {
+    if (address > end || (u64)count * sizeof(u64) > end - address) return 0;
+    const u64 *candidate = (const u64 *)(u64)address;
+    for (u32 i = 0; i < count; ++i)
+        if (candidate[i] != words[i]) return 0;
+    return 1;
+}
+
+static void find_request_window(range *segments, u32 count, u64 *window_start,
+                                u64 *window_end) {
+    const u64 start_marker[4] = BYTER_REQUESTS_START_MARKER;
+    const u64 end_marker[2] = BYTER_REQUESTS_END_MARKER;
+    u64 image_start = ~0ULL, image_end = 0;
+    u64 last_start_marker = 0, first_end_marker = ~0ULL;
+    int found_start_marker = 0, found_end_marker = 0;
+
+    for (u32 i = 0; i < count; ++i) {
+        range segment = segments[i];
+        if (!segment.length || segment.base > ~0ULL - segment.length) continue;
+        u64 end = segment.base + segment.length;
+        if (segment.base < image_start) image_start = segment.base;
+        if (end > image_end) image_end = end;
+
+        if (segment.base > ~0ULL - 7) continue;
+        u64 address = (segment.base + 7) & ~7ULL;
+        while (address <= end && end - address >= sizeof(end_marker)) {
+            if (matches_words(address, start_marker, 4, end)) {
+                last_start_marker = address;
+                found_start_marker = 1;
+            }
+            if (matches_words(address, end_marker, 2, end) &&
+                (!found_end_marker || address < first_end_marker)) {
+                first_end_marker = address;
+                found_end_marker = 1;
+            }
+            if (end - address < sizeof(u64)) break;
+            address += sizeof(u64);
+        }
+    }
+
+    *window_start = found_start_marker ? last_start_marker + sizeof(start_marker) : image_start;
+    *window_end = found_end_marker ? first_end_marker : image_end;
+    /* Base revision 0 treats delimiters as hints, so ignore malformed bounds. */
+    if (*window_start >= *window_end) {
+        *window_start = image_start;
+        *window_end = image_end;
+    }
+}
+
 static void resolve_requests(range *segments, u32 count,
                              struct byter_bootloader_info_response *bootloader_info,
                              struct byter_dtb_response *dtb,
                              struct byter_framebuffer_response *framebuffer,
                              struct byter_memmap_response *memmap) {
+    u64 window_start, window_end;
+    find_request_window(segments, count, &window_start, &window_end);
+    if (window_start >= window_end) return;
+
+    const u64 common_magic[2] = {0xc7b1dd30df4c8b88ULL, 0x0a82e883a194f07bULL};
+    const u64 request_size = sizeof(struct byter_memmap_request);
     for (u32 i = 0; i < count; ++i) {
-        if (segments[i].length < sizeof(struct byter_bootloader_info_request)) continue;
-        u64 limit = segments[i].base + segments[i].length - sizeof(struct byter_bootloader_info_request);
-        for (u64 address = (segments[i].base + 7) & ~7ULL; address <= limit; address += 8) {
+        range segment = segments[i];
+        if (!segment.length || segment.base > ~0ULL - segment.length) continue;
+        u64 segment_end = segment.base + segment.length;
+        u64 start = segment.base > window_start ? segment.base : window_start;
+        u64 end = segment_end < window_end ? segment_end : window_end;
+        if (start > ~0ULL - 7) continue;
+        u64 address = (start + 7) & ~7ULL;
+        while (address <= end && end - address >= request_size) {
             u64 *id = (u64 *)(u64)address;
+            if (id[0] != common_magic[0] || id[1] != common_magic[1]) {
+                if (end - address < sizeof(u64)) break;
+                address += sizeof(u64);
+                continue;
+            }
+
             u64 *revision = id + 4;
             u64 *response = id + 5;
-            if (*revision != 0) continue;
-            if (has_id(id, (const u64[])BYTER_BOOTLOADER_INFO_REQUEST_ID))
-                *response = (u64)bootloader_info;
-            else if (has_id(id, (const u64[])BYTER_DTB_REQUEST_ID))
-                *response = (u64)dtb;
-            else if (has_id(id, (const u64[])BYTER_FRAMEBUFFER_REQUEST_ID))
-                *response = (u64)framebuffer;
-            else if (has_id(id, (const u64[])BYTER_MEMMAP_REQUEST_ID))
-                *response = (u64)memmap;
+            *response = 0;
+            if (*revision == 0) {
+                if (has_id(id, (const u64[])BYTER_BOOTLOADER_INFO_REQUEST_ID))
+                    *response = (u64)bootloader_info;
+                else if (has_id(id, (const u64[])BYTER_DTB_REQUEST_ID))
+                    *response = (u64)dtb;
+                else if (has_id(id, (const u64[])BYTER_FRAMEBUFFER_REQUEST_ID))
+                    *response = (u64)framebuffer;
+                else if (has_id(id, (const u64[])BYTER_MEMMAP_REQUEST_ID))
+                    *response = (u64)memmap;
+            }
+            if (end - address < sizeof(u64)) break;
+            address += sizeof(u64);
         }
     }
 }
