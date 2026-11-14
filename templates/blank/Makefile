@@ -10,7 +10,7 @@ kernel: $(OUT)/kernel.elf
 $(OUT):
 	mkdir -p $@
 
-$(OUT)/main.o: main.c | $(OUT)
+$(OUT)/main.o: src/main.c | $(OUT)
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 $(OUT)/kernel.elf: $(OUT)/main.o kernel.ld
