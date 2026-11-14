@@ -259,13 +259,16 @@ int byter_aarch64_build_page_tables(
         (has_framebuffer && !subtract_range(low_identity_ranges, &low_identity_count, framebuffer_pages)))
         return 0;
 
-    *failure_stage = BYTER_PT_STAGE_IDENTITY;
+    *failure_stage = BYTER_PT_STAGE_IDENTITY_LOW;
     for (uint32_t i = 0; i < low_identity_count; ++i)
         if (!map_ram_range(&state, low_identity_ranges[i], 0)) return 0;
+    *failure_stage = BYTER_PT_STAGE_IDENTITY_RAM;
     for (uint32_t i = 0; i < identity_count; ++i)
         if (!map_ram_range(&state, identity_ranges[i], 0)) return 0;
+    *failure_stage = BYTER_PT_STAGE_IDENTITY_SHIM;
     if (!map_special_range(&state, (range){(uint64_t)shim, shim_size}, ATTR_NORMAL_WB,
                            PF_W | PF_X, 0)) return 0;
+    *failure_stage = BYTER_PT_STAGE_IDENTITY_FRAMEBUFFER;
     if (has_framebuffer && !map_special_range(&state,
         (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W | PF_X, 0)) return 0;
 

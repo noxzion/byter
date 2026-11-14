@@ -39,7 +39,10 @@ enum {
     STAGE_TABLES = 0x38bdf8,
     STAGE_PT_INIT_FAILED = 0xff006e,
     STAGE_PT_RANGES_FAILED = 0x9d4edd,
-    STAGE_PT_IDENTITY_FAILED = 0x00b4d8,
+    STAGE_PT_IDENTITY_LOW_FAILED = 0x00b4d8,
+    STAGE_PT_IDENTITY_RAM_FAILED = 0x00e5ff,
+    STAGE_PT_IDENTITY_SHIM_FAILED = 0x4361ee,
+    STAGE_PT_IDENTITY_FB_FAILED = 0x90e0ef,
     STAGE_PT_HHDM_FAILED = 0x80b918,
     STAGE_PT_KERNEL_FAILED = 0xf72585,
     STAGE_PT_CLEAN_FAILED = 0x3a0ca3,
@@ -846,7 +849,9 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
             (struct byter_aarch64_range){framebuffer_range.base, framebuffer_range.length},
             has_framebuffer, page_table_segments, segment_count, &page_tables, &page_table_failure_stage)) {
         static const u32 failure_colors[] = {
-            0, STAGE_PT_INIT_FAILED, STAGE_PT_RANGES_FAILED, STAGE_PT_IDENTITY_FAILED,
+            0, STAGE_PT_INIT_FAILED, STAGE_PT_RANGES_FAILED,
+            STAGE_PT_IDENTITY_LOW_FAILED, STAGE_PT_IDENTITY_RAM_FAILED,
+            STAGE_PT_IDENTITY_SHIM_FAILED, STAGE_PT_IDENTITY_FB_FAILED,
             STAGE_PT_HHDM_FAILED, STAGE_PT_KERNEL_FAILED, STAGE_PT_CLEAN_FAILED
         };
         if (page_table_failure_stage < sizeof(failure_colors) / sizeof(failure_colors[0]))

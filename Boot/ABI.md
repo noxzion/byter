@@ -70,7 +70,10 @@ reached if execution stops:
 | Slate | Memory map built |
 | Hot pink | Page table setup or physical address sizing failed |
 | Lavender | Page table ranges failed |
-| Cyan | Identity mappings failed |
+| Cyan | Low identity mapping failed |
+| Bright cyan | Other RAM identity mapping failed |
+| Blue | Shim identity mapping failed |
+| Pale cyan | Framebuffer identity mapping failed |
 | Lime | HHDM mappings failed |
 | Rose | Kernel mappings failed |
 | Deep indigo | Page table cache clean failed |
