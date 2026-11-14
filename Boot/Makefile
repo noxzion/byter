@@ -25,7 +25,7 @@ $(OUT)/entry.o: $(ARCH)/entry.S | $(OUT)
 $(OUT)/elf_loader.o: $(CORE)/elf_loader.c $(CORE)/console.h include/byter.h $(ARCH)/page_tables.h | $(OUT)
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-$(OUT)/console.o: $(CORE)/console.c $(CORE)/console.h $(CORE)/font8x8_basic.h include/byter.h | $(OUT)
+$(OUT)/console.o: $(CORE)/console.c $(CORE)/console.h $(CORE)/font8x16_basic.h include/byter.h | $(OUT)
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 $(OUT)/a059_framebuffer.o: platform/a059/framebuffer.c platform/a059/framebuffer.h include/byter.h | $(OUT)

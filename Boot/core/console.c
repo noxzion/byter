@@ -4,11 +4,10 @@ typedef unsigned char u8;
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
-#include "font8x8_basic.h"
+#include "font8x16_basic.h"
 
-#define FONT_SCALE 2U
-#define CELL_WIDTH (8U * FONT_SCALE)
-#define CELL_HEIGHT (8U * FONT_SCALE)
+#define CELL_WIDTH 8U
+#define CELL_HEIGHT 16U
 #define LINE_GAP 4U
 #define MARGIN 24U
 
@@ -31,12 +30,6 @@ static void fill(u32 x, u32 y, u32 width, u32 height, u32 value) {
     for (u32 row = 0; row < height; ++row)
         for (u32 column = 0; column < width; ++column)
             pixels[(y + row) * stride + x + column] = value;
-}
-
-static void clear(void) {
-    fill(0, 0, (u32)console_fb.width, (u32)console_fb.height, background);
-    cursor_x = MARGIN;
-    cursor_y = MARGIN;
 }
 
 static void scroll(void) {
@@ -62,18 +55,13 @@ static void draw_glyph(u8 character) {
     if (cursor_x + CELL_WIDTH > console_fb.width) next_line();
     if (cursor_y + CELL_HEIGHT > console_fb.height) scroll();
 
-    const u8 *glyph = font8x8_basic[character];
+    const u8 *glyph = font8x16_basic[character];
     volatile u32 *pixels = console_fb.address;
     u32 stride = (u32)(console_fb.pitch / sizeof(u32));
-    for (u32 y = 0; y < 8; ++y) {
-        for (u32 x = 0; x < 8; ++x) {
-            u32 pixel = (glyph[y] & (1U << x)) ? foreground : background;
-            u32 px = cursor_x + x * FONT_SCALE;
-            u32 py = cursor_y + y * FONT_SCALE;
-            pixels[py * stride + px] = pixel;
-            pixels[py * stride + px + 1] = pixel;
-            pixels[(py + 1) * stride + px] = pixel;
-            pixels[(py + 1) * stride + px + 1] = pixel;
+    for (u32 y = 0; y < CELL_HEIGHT; ++y) {
+        for (u32 x = 0; x < CELL_WIDTH; ++x) {
+            u32 pixel = (glyph[y] & (1U << (7 - x))) ? foreground : background;
+            pixels[(cursor_y + y) * stride + cursor_x + x] = pixel;
         }
     }
     cursor_x += CELL_WIDTH;
@@ -95,7 +83,8 @@ void byter_console_set_framebuffer(const struct byter_framebuffer *framebuffer) 
     background = color(0x10, 0x14, 0x1c);
     ready = 1;
     if (changed) {
-        clear();
+        cursor_x = MARGIN;
+        cursor_y = MARGIN;
         byter_console_write("BYTER BOOT\n");
     }
 }

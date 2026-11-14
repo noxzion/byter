@@ -61,10 +61,10 @@ by the selected base-revision-0 subset. This implementation does not claim full
 Limine base-revision-0 compatibility; the tag currently negotiates the Byter
 handoff contract described here.
 
-The shim clears the framebuffer at startup and prints boot progress using its
-built-in 8x8 bitmap font. It reports major loading stages and the specific stage
-of page-table setup failures; the last printed line remains visible if execution
-stops. The font is public domain.
+The shim prints boot progress directly to the framebuffer using its built-in
+8x16 bitmap font; it does not clear the full screen first. It reports major
+loading stages and the specific stage of page-table setup failures. The last
+printed line remains visible if execution stops. The font bitmap is CC0.
 
 ## Declared but not implemented
 
