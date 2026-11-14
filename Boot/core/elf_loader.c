@@ -3,6 +3,7 @@
 #include "../arch/aarch64/page_tables.h"
 #include "console.h"
 #include "boot_menu.h"
+#include "boot_catalog.h"
 
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -25,7 +26,6 @@ void *memcpy(void *destination, const void *source, u64 length) {
 #define HANDOFF_OFFSET 0x100000ULL
 #define HANDOFF_SIZE 0x10000ULL
 #define STACK_SIZE 0x30000ULL
-#define MAX_CMDLINE_SIZE 1024ULL
 
 typedef struct { u64 base, length; } range;
 typedef struct { u64 entry, ttbr0, ttbr1, tcr; } boot_context;
@@ -896,19 +896,15 @@ static void resolve_requests(range *segments, u32 count,
 }
 
 /* Returns the ELF entry address, or zero on any validation/loading failure. */
-u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
-                    u64 file_size, u8 *cmdline, u64 cmdline_size) {
+u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *catalog, u64 catalog_size,
+                    u64 shim_size, u64 file_size) {
     u32 dtb_size = 0, memory_count = 0, reserved_count = 0;
     u32 root_address_cells = 0, root_size_cells = 0;
     framebuffer_info framebuffer_data = {0};
+    struct byter_boot_option options[BYTER_BOOT_MAX_OPTIONS];
+    u32 option_count = 0;
     range memory[MAX_RANGES], reserved[MAX_RANGES];
     if ((u64)shim > ~0ULL - shim_size || file_size > shim_size) return 0;
-    if (!cmdline || !cmdline_size || cmdline_size > MAX_CMDLINE_SIZE + 1 ||
-        (u64)cmdline < (u64)shim || (u64)cmdline - (u64)shim > file_size ||
-        cmdline_size > file_size - ((u64)cmdline - (u64)shim) ||
-        cmdline[cmdline_size - 1] != 0) return 0;
-    for (u64 i = 0; i + 1 < cmdline_size; ++i)
-        if (cmdline[i] == 0) return 0;
     struct byter_framebuffer early_framebuffer;
     if (byter_a059_framebuffer_fallback(&early_framebuffer))
         set_status_framebuffer(&early_framebuffer);
@@ -946,7 +942,16 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
     status_framebuffer = framebuffer_data;
     sync_status_console();
     log_boot_stage("Device tree and framebuffer ready");
-    byter_boot_menu_wait();
+    if (!byter_boot_catalog_parse(shim, file_size, catalog, catalog_size,
+                                  options, &option_count)) {
+        log_boot_stage("ERROR: invalid boot catalog");
+        return 0;
+    }
+    u32 selected = byter_boot_menu_wait(options, option_count);
+    if (selected >= option_count) selected = 0;
+    u8 *elf = options[selected].elf;
+    u64 elf_size = options[selected].elf_size;
+    u8 *cmdline = options[selected].cmdline;
     if ((u64)elf < (u64)shim || (u64)elf - (u64)shim > file_size ||
         elf_size > file_size - ((u64)elf - (u64)shim)) return 0;
 

@@ -66,6 +66,18 @@ The shim prints boot progress directly to the framebuffer using its built-in
 loading stages and the specific stage of page-table setup failures. The last
 printed line remains visible if execution stops. The font bitmap is CC0.
 
+## Android boot image catalog
+
+The packer embeds a bounded catalog after the shim. It stores up to 16 entries;
+each entry has a printable ASCII label (1–63 bytes), an AArch64 ELF, and a
+NUL-terminated UTF-8 command line (0–1024 bytes). The shim validates catalog
+version, offsets, lengths, string terminators, and non-overlapping ELF ranges
+before showing the menu. Volume Up/Down move through entries, Power selects,
+Essential Key requests a reboot into the A059 bootloader Fastboot mode, and
+timeout selects entry zero. The centered menu is drawn over the existing splash
+framebuffer without clearing its logo. The legacy `kernel=`/`cmdline=` config
+maps to one entry named `Byter`.
+
 ## Declared but not implemented
 
 The following IDs are declared in `byter.h`, but the shim does not implement
