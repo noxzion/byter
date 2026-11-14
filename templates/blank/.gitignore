@@ -1,1 +1,4 @@
 /build/
+/byter/
+/loader/
+/tools/pack_android_boot.py

@@ -1,16 +1,20 @@
-# Пустое ядро Byter
+# Byter template
 
 Шаблон запрашивает framebuffer, очищает его в чёрный цвет и останавливается.
 Он не выводит текст и не рисует другие элементы.
 
 ```sh
-make -C templates/blank
-make -C templates/blank boot
+make
+make boot
 ```
 
-Первая команда собирает `templates/blank/build/kernel.elf`. Вторая отправляет
-ядро в RAM телефона через `fastboot boot`. Для работы нужны инструменты из
-корневого README и подключённый телефон в режиме Fastboot.
+`make` скачивает нужные заголовки, загрузчик и упаковщик с GitHub, затем собирает
+`build/byter-boot.img`. `make kernel` собирает только `build/kernel.elf`.
+`make boot` отправляет RAM-образ в телефон через `fastboot boot`.
+
+Нужны `clang`, `ld.lld`, `llvm-objcopy`, `python3`, `mkbootimg` и `fastboot`.
+Шаблон можно собирать отдельно от основного репозитория; для `make boot` телефон
+должен быть подключён в режиме Fastboot.
 
 Исходник ядра находится в `src/main.c`; настройки компоновки и
 Byter-конфигурация лежат в корне шаблона.
