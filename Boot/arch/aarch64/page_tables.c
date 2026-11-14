@@ -251,11 +251,12 @@ int byter_aarch64_build_page_tables(
             identity_count == MAX_MAP_RANGES) return 0;
         identity_ranges[identity_count++] = aligned;
     }
-    range low_identity_ranges[2] = {{PAGE_SIZE, BASE_REVISION_ZERO_IDENTITY_SIZE - PAGE_SIZE}};
+    range low_identity_ranges[3] = {{PAGE_SIZE, BASE_REVISION_ZERO_IDENTITY_SIZE - PAGE_SIZE}};
     uint32_t low_identity_count = 1;
     if (!subtract_range(identity_ranges, &identity_count, (range){0, BASE_REVISION_ZERO_IDENTITY_SIZE}) ||
         !subtract_range(identity_ranges, &identity_count, shim_pages) ||
         (has_framebuffer && !subtract_range(identity_ranges, &identity_count, framebuffer_pages)) ||
+        !subtract_range(low_identity_ranges, &low_identity_count, shim_pages) ||
         (has_framebuffer && !subtract_range(low_identity_ranges, &low_identity_count, framebuffer_pages)))
         return 0;
 
