@@ -98,7 +98,9 @@ Shim загружает AArch64 ELF64 `ET_EXEC` по `p_paddr`, отобража
 совместимости с Limine base revision 0: физическая карта ограничена данными DTB.
 
 - На Nothing Phone (3a) ядро достигло EL1 и прошло проверки base-revision tag,
-  HHDM и memory map. Отдельная проверка exception paths остаётся открытой.
+  HHDM и memory map. Пример также выполнил EL1 SVC, проверил exception class в
+  `ESR_EL1` и успешно вернулся через `eret`. IRQ, FIQ, SError и abort recovery
+  пока не проверялись и остаются фатальными.
 - Сохранять в `example/` проверку хотя бы одного DTB `reg`-ресурса, целиком
   отмеченного `RESERVED`: голубой маркер подтверждает её, красный означает отказ.
 - Сверить оставшиеся требования Limine base revision 0; не объявлять полную

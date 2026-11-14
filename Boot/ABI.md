@@ -47,7 +47,9 @@ cover `0..4 GiB`, those RAM ranges, and framebuffer. Physical address
 interrupts masked. The handoff provides a 192 KiB stack, zeroes general-purpose
 registers, configures `MAIR_EL1`, `TCR_EL1`, `TTBR0_EL1`, `TTBR1_EL1`, and
 `SCTLR_EL1`, and enters at EL1. When starting at EL2 it clears trap controls and
-drops to EL1 first.
+drops to EL1 first. The example installs a vector table and verifies one
+current-EL SVC exception/return path; other exception classes are not yet
+recovered.
 
 The shim's memory map is still based on DTB RAM, reservations, and device ranges
 that can be translated unambiguously through `ranges`, not a complete firmware

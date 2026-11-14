@@ -5,6 +5,9 @@
 
 static volatile uint64_t base_revision[3] BYTER_REQUEST = BYTER_BASE_REVISION(0);
 extern void byter_vectors(void);
+extern void byter_test_svc(void);
+volatile uint64_t byter_exception_count;
+volatile uint64_t byter_exception_esr;
 
 static volatile uint64_t request_start[4]
     __attribute__((used, section(".byter_requests_start"), aligned(8))) = BYTER_REQUESTS_START_MARKER;
@@ -188,6 +191,15 @@ void _start(void) {
         show_diagnostic_marker(fb, 0xff, 0x00, 0x00); /* DTB device map check failed. */
         wait_forever();
     }
+
+    show_stage(fb, 0xff, 0x00, 0xff); /* EL1 synchronous exception test armed. */
+    byter_test_svc();
+    uint64_t exception_class = (byter_exception_esr >> 26) & 0x3f;
+    if (byter_exception_count != 1 || exception_class != 0x15) {
+        show_stage(fb, 0xff, 0x00, 0x00); /* SVC was not handled and returned. */
+        wait_forever();
+    }
+
     volatile uint32_t *pixels = fb->address;
     uint32_t stride = (uint32_t)(fb->pitch / 4);
     for (uint32_t y = 0; y < fb->height; ++y)
