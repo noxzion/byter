@@ -1,12 +1,13 @@
 .DEFAULT_GOAL := all
 
-.PHONY: help all image kernel boot doctor clean
+.PHONY: help all image kernel boot diagnostic doctor clean
 
 help:
 	@printf '%s\n' 'make         собрать RAM-образ' \
 	               'make kernel  собрать ELF-ядро' \
 	               'make boot    собрать и запустить через fastboot boot' \
 	               'make boot ELF=/path/kernel.elf  загрузить своё ELF' \
+	               'make diagnostic  собрать и запустить отдельный диагностический образ' \
 	               'make doctor  проверить инструменты сборки' \
 	               'make clean   удалить результаты сборки'
 
@@ -20,6 +21,9 @@ kernel:
 
 boot:
 	$(MAKE) -C Boot boot $(if $(ELF),ELF=$(abspath $(ELF)))
+
+diagnostic:
+	$(MAKE) -C Boot diagnostic $(if $(ELF),ELF=$(abspath $(ELF)))
 
 doctor:
 	@status=0; for tool in clang ld.lld llvm-objcopy mkbootimg fastboot python3; do \

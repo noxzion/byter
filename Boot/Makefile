@@ -10,7 +10,7 @@ ARCH := arch/aarch64
 CORE := core
 PACKER := ../tools/pack_android_boot.py
 
-.PHONY: all image shim kernel boot clean FORCE
+.PHONY: all image shim kernel boot diagnostic clean FORCE
 all: image
 image: $(OUT)/byter-boot.img
 shim: $(OUT)/boot-shim.bin
@@ -53,6 +53,12 @@ $(OUT)/byter-boot.img: FORCE $(OUT)/boot-shim.bin $(ELF) $(PACKER)
 
 boot: image
 	fastboot boot $(OUT)/byter-boot.img
+
+$(OUT)/byter-diagnostic.img: FORCE $(OUT)/boot-shim.bin $(ELF) $(PACKER)
+	python3 $(PACKER) --shim $(OUT)/boot-shim.bin --elf $(ELF) --kernel-out $(OUT)/byter-diagnostic-kernel.img --boot-out $@ --mkbootimg $(MKBOOTIMG)
+
+diagnostic: $(OUT)/byter-diagnostic.img
+	fastboot boot $(OUT)/byter-diagnostic.img
 
 clean:
 	rm -rf $(OUT)
