@@ -66,10 +66,12 @@ reached if execution stops:
 | Mint | ELF image is in RAM and clear of shim/DTB |
 | Aqua | ELF image is clear of firmware reservations |
 | Indigo | ELF image is clear of framebuffer mappings |
+| Rose | Usable memory ranges prepared |
+| Slate | Memory map built |
+| Sky | Page tables built |
 | Orange | ELF loaded |
 | Purple | Base revision accepted |
 | Magenta | ABI responses prepared |
-| Teal | Page tables prepared |
 | Red | EL2 accepted; dropping to EL1 (only when entered at EL2) |
 | White | EL1 handoff reached |
 | Violet | Kernel entered and base revision checked |

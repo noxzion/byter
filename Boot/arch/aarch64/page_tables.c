@@ -249,7 +249,7 @@ int byter_aarch64_build_page_tables(
             identity_count == MAX_MAP_RANGES) return 0;
         identity_ranges[identity_count++] = aligned;
     }
-    range low_identity_ranges[1] = {{PAGE_SIZE, BASE_REVISION_ZERO_IDENTITY_SIZE - PAGE_SIZE}};
+    range low_identity_ranges[2] = {{PAGE_SIZE, BASE_REVISION_ZERO_IDENTITY_SIZE - PAGE_SIZE}};
     uint32_t low_identity_count = 1;
     if (!subtract_range(identity_ranges, &identity_count, (range){0, BASE_REVISION_ZERO_IDENTITY_SIZE}) ||
         !subtract_range(identity_ranges, &identity_count, shim_pages) ||
@@ -267,7 +267,7 @@ int byter_aarch64_build_page_tables(
         (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W | PF_X, 0)) return 0;
 
     range hhdm_ranges[MAX_MAP_RANGES];
-    range low_hhdm_ranges[1] = {{0, BASE_REVISION_ZERO_IDENTITY_SIZE}};
+    range low_hhdm_ranges[2] = {{0, BASE_REVISION_ZERO_IDENTITY_SIZE}};
     uint32_t low_hhdm_count = 1;
     uint32_t hhdm_count = 0;
     for (uint32_t i = 0; i < memory_count; ++i) {

@@ -34,10 +34,12 @@ enum {
     STAGE_IMAGE_IN_RAM = 0x10b981,
     STAGE_IMAGE_RESERVED = 0x06b6d4,
     STAGE_IMAGE_FRAMEBUFFER = 0x6366f1,
+    STAGE_USABLE_MAP = 0xfb7185,
+    STAGE_MEMMAP = 0x64748b,
+    STAGE_TABLES = 0x38bdf8,
     STAGE_ELF_LOADED = 0xf97316,
     STAGE_BASE_REVISION = 0xa855f7,
     STAGE_ABI_READY = 0xd946ef,
-    STAGE_TABLES = 0x14b8a6,
     STAGE_EL2_DROP = 0xdc2626,
     STAGE_HANDOFF = 0xffffff,
 };
@@ -808,6 +810,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     if (!subtract_range(usable, &usable_count, executable_image) ||
         !subtract_range(usable, &usable_count, (range){0, 0x1000})) return 0;
     if (has_framebuffer && !subtract_range(usable, &usable_count, framebuffer_pages)) return 0;
+    show_boot_stage(STAGE_USABLE_MAP);
 
     if (shim_size < HANDOFF_OFFSET + HANDOFF_SIZE + STACK_SIZE + 0x10000) return 0;
     u8 *handoff = shim + shim_size - HANDOFF_OFFSET;
@@ -827,6 +830,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
                           shim_pages, dtb_pages,
                           segments, segment_count, executable_image, framebuffer_pages, has_framebuffer,
                           usable, usable_count, memmap_entries, &memmap_count)) return 0;
+    show_boot_stage(STAGE_MEMMAP);
     struct byter_aarch64_range page_table_memory[MAX_RANGES];
     for (u32 i = 0; i < memory_count; ++i)
         page_table_memory[i] = (struct byter_aarch64_range){memory[i].base, memory[i].length};
@@ -835,6 +839,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
             (struct byter_aarch64_range){framebuffer_range.base, framebuffer_range.length},
             has_framebuffer, page_table_segments, segment_count, &page_tables)) return 0;
     u64 hhdm_offset = page_tables.hhdm_offset;
+    show_boot_stage(STAGE_TABLES);
 
     for (u32 i = 0; i < memmap_count; ++i)
         memmap_entry_pointers[i] = (struct byter_memmap_entry *)(u64)
@@ -897,7 +902,6 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
                      hhdm_response, framebuffer_result, memmap_response,
                      executable_address_response, hhdm_offset);
     show_boot_stage(STAGE_ABI_READY);
-    show_boot_stage(STAGE_TABLES);
     boot_context *context = (boot_context *)(handoff + HANDOFF_SIZE - sizeof(*context));
     *context = (boot_context){eh->entry, page_tables.ttbr0, page_tables.ttbr1, page_tables.tcr};
     return (u64)context;
