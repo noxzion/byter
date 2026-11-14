@@ -197,14 +197,30 @@ static int add_regs(range *out, u32 *count, const u8 *data, u32 length, u32 ac, 
     return 1;
 }
 
-/* Parse only the FDT memory and reserved-memory ranges needed for safe PT_LOAD placement. */
+/* Parse FDT RAM and reservations needed for the memory map and safe PT_LOAD placement. */
 static int parse_fdt(u8 *dtb, u32 *total_size, range *memory, u32 *memory_count,
                      range *reserved, u32 *reserved_count, framebuffer_info *framebuffer) {
     if (!dtb || be32(dtb) != 0xd00dfeed) return 0;
     u32 total = be32(dtb + 4), struct_off = be32(dtb + 8), strings_off = be32(dtb + 12);
+    u32 reserve_off = be32(dtb + 16);
     u32 strings_size = be32(dtb + 32), struct_size = be32(dtb + 36);
     if (total < 40 || total > 16 * 1024 * 1024 || struct_off > total || struct_size > total - struct_off ||
-        strings_off > total || strings_size > total - strings_off) return 0;
+        strings_off > total || strings_size > total - strings_off || reserve_off < 40 ||
+        (reserve_off & 7) || reserve_off > total - 16) return 0;
+
+    *memory_count = 0;
+    *reserved_count = 0;
+    u32 reserve_cursor = reserve_off;
+    for (;;) {
+        if (reserve_cursor > total - 16) return 0;
+        u64 base = cells_value(dtb + reserve_cursor, 2);
+        u64 size = cells_value(dtb + reserve_cursor + 8, 2);
+        reserve_cursor += 16;
+        if (!base && !size) break;
+        if (!size || base > ~0ULL - size || *reserved_count == MAX_RANGES) return 0;
+        reserved[(*reserved_count)++] = (range){base, size};
+    }
+
     u8 *st = dtb + struct_off, *st_end = st + struct_size;
     const char *strings = (const char *)(dtb + strings_off);
     u32 ac = 2, sc = 2, depth = 0;
@@ -243,7 +259,7 @@ static int parse_fdt(u8 *dtb, u32 *total_size, range *memory, u32 *memory_count,
     framebuffer_info node_framebuffer[32] = {{0}};
     u32 node_ac[32] = {0}, node_sc[32] = {0};
     node_ac[0] = ac; node_sc[0] = sc;
-    depth = 0; ended = 0; *memory_count = 0; *reserved_count = 0;
+    depth = 0; ended = 0; *memory_count = 0;
     *framebuffer = (framebuffer_info){0};
     for (u8 *p = st; p + 4 <= st_end;) {
         u32 token = be32(p); p += 4;
