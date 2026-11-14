@@ -74,11 +74,18 @@ static int valid_memory_map(const struct byter_memmap_response *map) {
     return has_usable && has_bootloader && has_kernel;
 }
 
+static int cmdline_equals(const char *cmdline, const char *expected) {
+    if (!cmdline || !expected) return 0;
+    for (uint32_t i = 0; i <= 1024; ++i) {
+        if (cmdline[i] != expected[i]) return 0;
+        if (!expected[i]) return 1;
+    }
+    return 0;
+}
+
 static int valid_cmdline(const struct byter_executable_cmdline_response *response) {
     if (!response || response->revision != 0 || !response->cmdline) return 0;
-    for (uint32_t i = 0; i <= 1024; ++i)
-        if (!response->cmdline[i]) return 1;
-    return 0;
+    return cmdline_equals(response->cmdline, "byter.example=1");
 }
 
 static int valid_executable_address(const struct byter_executable_address_response *address,
