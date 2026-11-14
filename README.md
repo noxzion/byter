@@ -51,9 +51,10 @@ make boot ELF=/путь/к/моему-ядру.elf
 - `Boot/core/` — загрузчик ELF и обработка запросов Limine.
 - `Boot/include/byter.h` — Byter-имена для структур и ID Limine-совместимого wire ABI.
 - [`Boot/ABI.md`](Boot/ABI.md) — поддерживаемые запросы, ревизии и ограничения ABI.
-- `example/` — минимальный пример ядра на Byter ABI.
 - `tools/` — упаковка Android boot image и инструменты разработки.
 - [ROADMAP.md](ROADMAP.md) — этапы развития и критерии готовности.
+
+[Минимальный пример ядра на Byter ABI](https://github.com/noxzion/byter-template.git)
 
 Shim включает 4 KiB page tables перед входом в ядро: RAM и boot data остаются
 доступны по identity map, а ELF-сегменты отображаются по своим виртуальным
