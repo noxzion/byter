@@ -65,12 +65,15 @@ _start:
 	b.eq .Lenable_el1
 	b .Lfailed
 .Ldrop_to_el1:
+	bl byter_shim_el2_drop_stage
 	mov x9, sp
 	msr SP_EL1, x9
-	mrs x9, HCR_EL2
-	movz x10, #0x8000, lsl #16
-	orr x9, x9, x10              /* EL1 executes AArch64. */
+	movz x9, #0x8000, lsl #16     /* HCR_EL2.RW: EL1 uses AArch64. */
 	msr HCR_EL2, x9
+	mov x9, #3
+	msr CNTHCTL_EL2, x9
+	msr CPTR_EL2, xzr
+	msr HSTR_EL2, xzr
 	adr x9, .Lenable_el1
 	msr ELR_EL2, x9
 	mov x9, #0x3c5               /* EL1h, with DAIF masked. */
@@ -87,13 +90,48 @@ _start:
 	tlbi vmalle1
 	dsb sy
 	isb
-	mrs x9, SCTLR_EL1
-	orr x9, x9, #1                /* MMU */
-	orr x9, x9, #4                /* Data cache */
-	orr x9, x9, #0x1000           /* Instruction cache */
+	movz x9, #0x1805              /* SCTLR_EL1.M/C/I on; alignment checks off. */
+	movk x9, #0x30d0, lsl #16     /* Architectural RES1 bits, other controls clear. */
 	msr SCTLR_EL1, x9
 	isb
-	br x20
+	bl byter_shim_handoff_stage
+	msr ELR_EL1, x20
+	mov x9, #0x3c5                /* EL1h with all interrupts masked. */
+	msr SPSR_EL1, x9
+	msr CPACR_EL1, xzr
+	isb
+	mov x0, xzr
+	mov x1, xzr
+	mov x2, xzr
+	mov x3, xzr
+	mov x4, xzr
+	mov x5, xzr
+	mov x6, xzr
+	mov x7, xzr
+	mov x8, xzr
+	mov x9, xzr
+	mov x10, xzr
+	mov x11, xzr
+	mov x12, xzr
+	mov x13, xzr
+	mov x14, xzr
+	mov x15, xzr
+	mov x16, xzr
+	mov x17, xzr
+	mov x18, xzr
+	mov x19, xzr
+	mov x20, xzr
+	mov x21, xzr
+	mov x22, xzr
+	mov x23, xzr
+	mov x24, xzr
+	mov x25, xzr
+	mov x26, xzr
+	mov x27, xzr
+	mov x28, xzr
+	mov x29, xzr
+	mov x30, xzr
+	eret
 1:
 	.Lfailed:
 	wfe

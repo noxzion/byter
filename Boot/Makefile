@@ -40,8 +40,11 @@ $(OUT)/boot-shim.bin: $(OUT)/boot-shim.elf
 $(OUT)/kernel.o: ../example/main.c include/byter.h | $(OUT)
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-$(OUT)/kernel.elf: $(OUT)/kernel.o ../example/kernel.ld
-	$(LLD) -T ../example/kernel.ld --build-id=none --no-undefined $(OUT)/kernel.o -o $@
+$(OUT)/kernel_vectors.o: ../example/vectors.S | $(OUT)
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+$(OUT)/kernel.elf: $(OUT)/kernel.o $(OUT)/kernel_vectors.o ../example/kernel.ld
+	$(LLD) -T ../example/kernel.ld --build-id=none --no-undefined $(OUT)/kernel.o $(OUT)/kernel_vectors.o -o $@
 
 FORCE:
 

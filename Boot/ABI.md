@@ -7,8 +7,9 @@ claim full Limine Boot Protocol compatibility.
 
 ## Common rules
 
-- The current handoff uses the implicit base revision 0. The example does not
-  include a base revision tag, and the shim does not parse or update such tags.
+- The example requests base revision 0 with a base-revision tag. The shim
+  rejects tags requesting another revision and writes the selected revision 0
+  and success value back to the tag. Without a tag, base revision 0 is assumed.
 - Request objects are found at 8-byte-aligned addresses inside loaded ELF
   `PT_LOAD` segments. Before reading or writing a request, the shim checks that
   its 48-byte common header fits in that segment; it does not access
@@ -20,10 +21,11 @@ claim full Limine Boot Protocol compatibility.
   revisions therefore remain `NULL`.
 - Response objects are revision 0. All non-NULL pointers returned in responses
   and request `response` fields use the HHDM offset. The shim establishes 4 KiB
-  page tables before entering the kernel: DTB-declared RAM and framebuffer are
-  mapped at the HHDM offset; RAM, shim, DTB, handoff data, and framebuffer also
-  remain identity-mapped. ELF segments receive higher-half mappings with
-  permissions derived from `PT_LOAD` flags.
+  page tables before entering the kernel: the first 4 GiB, DTB-declared RAM,
+  and framebuffer are mapped at the HHDM offset; identity mappings cover the
+  first 4 GiB except page zero, RAM, shim, DTB, handoff data, and framebuffer.
+  ELF segments receive higher-half mappings with permissions derived from
+  `PT_LOAD` flags.
 
 ## Implemented requests
 
@@ -32,18 +34,44 @@ claim full Limine Boot Protocol compatibility.
 | `BYTER_BOOTLOADER_INFO_REQUEST_ID` | 0 | 0 | `name`, `version` | Static strings `Byter AArch64 shim` and `0.1`. |
 | `BYTER_DTB_REQUEST_ID` | 0 | 0 | `dtb_ptr` | Original DTB pointer received from ABL. The response does not provide a DTB size. |
 | `BYTER_FRAMEBUFFER_REQUEST_ID` | 0 | 0 | One framebuffer pointer and its address, dimensions, pitch, bpp, RGB masks, and memory model | Parsed from a DTB `simple-framebuffer` node; otherwise the A059 fallback profile. If no framebuffer is available, `response` remains `NULL`. EDID and video modes are not provided. |
-| `BYTER_HHDM_REQUEST_ID` | 0 | 0 | `offset` | Fixed AArch64 HHDM base `0xffff800000000000`; maps DTB RAM ranges and framebuffer. |
+| `BYTER_HHDM_REQUEST_ID` | 0 | 0 | `offset` | Fixed AArch64 HHDM base `0xffff800000000000`; maps the first 4 GiB, DTB RAM ranges, and framebuffer. |
 | `BYTER_MEMMAP_REQUEST_ID` | 0 | 0 | `entry_count`, pointer array of `{base, length, type}` entries | RAM ranges from DTB, split around known reservations, shim, DTB, ELF `PT_LOAD` ranges, and framebuffer. Limited to 512 output entries; non-RAM address space and unrecognized device ranges are omitted. |
 | `BYTER_EXECUTABLE_ADDRESS_REQUEST_ID` | 0 | 0 | `physical_base`, `virtual_base` | Lowest loaded `PT_LOAD` physical and virtual bases. The loader accepts AArch64 `ET_EXEC` segments with a uniform load bias, page-compatible addresses, and non-overlapping mappings; the example uses a higher-half VMA. |
 
 The current handoff enters at EL1 with the MMU and caches enabled, using a
-4 KiB translation granule and 48-bit virtual addressing. The HHDM covers the
-DTB RAM ranges and framebuffer; it does not map device address ranges absent
-from the DTB memory nodes. Identity mappings remain available for the same
-areas. The shim expects the Android arm64 entry conditions (MMU and data cache
-off) and stops if they are not met. This does not yet claim support for a
-Limine base revision: in particular, base-revision-specific identity-map and
-memory-map requirements are not all implemented.
+4 KiB translation granule and 48-bit virtual addressing. Base-revision-0
+identity mappings cover `0x1000..4 GiB` and all DTB RAM ranges; HHDM mappings
+cover `0..4 GiB`, those RAM ranges, and framebuffer. Physical address
+`0..0x1000` is not marked usable. The example enters at or above
+`0xffffffff80000000`, installs its own exception vector table, and runs with
+interrupts masked. The handoff provides a 192 KiB stack, zeroes general-purpose
+registers, configures `MAIR_EL1`, `TCR_EL1`, `TTBR0_EL1`, `TTBR1_EL1`, and
+`SCTLR_EL1`, and enters at EL1. When starting at EL2 it clears trap controls and
+drops to EL1 first.
+
+The shim's memory map is still based on the DTB RAM and known reservations, not
+a complete firmware physical-address map. This implementation does not claim
+full Limine base-revision-0 compatibility; the tag currently negotiates the
+Byter handoff contract described here.
+
+The center status square records boot progress and remains at the last stage
+reached if execution stops:
+
+| Color | Stage |
+| --- | --- |
+| Blue | Shim started |
+| Cyan | DTB and framebuffer accepted |
+| Yellow | ELF validated |
+| Orange | ELF loaded |
+| Purple | Base revision accepted |
+| Magenta | ABI responses prepared |
+| Teal | Page tables prepared |
+| Red | EL2 accepted; dropping to EL1 (only when entered at EL2) |
+| White | EL1 handoff reached |
+| Violet | Kernel entered and base revision checked |
+| Pink | Memory map checked |
+| Amber | Executable address checked |
+| Green | Framebuffer checked; demo running |
 
 ## Declared but not implemented
 

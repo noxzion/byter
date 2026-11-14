@@ -26,5 +26,8 @@ framebuffer и memory-map запросы. Карта памяти строитс
 reservations из DTB, с отдельными типами для областей загрузчика, ELF-ядра и
 framebuffer. Shim включает MMU и передаёт ядру identity map для RAM и boot data,
 а сегменты ядра отображает по ELF VMA с правами `PT_LOAD`. HHDM отображает RAM
-из DTB и framebuffer; это ещё не полная Limine memory map или base-revision
-совместимость.
+первые 4 GiB, RAM из DTB и framebuffer. Пример запрашивает Byter handoff revision 0
+и меняет цвет центрального квадрата после прохождения каждого этапа. Если
+загрузка останавливается, квадрат сохраняет цвет последнего достигнутого этапа.
+Memory map пока ограничена RAM и reservations из DTB, поэтому полной совместимости
+с Limine Boot Protocol ещё нет.

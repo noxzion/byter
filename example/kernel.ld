@@ -7,7 +7,7 @@ PHDRS
 }
 SECTIONS
 {
-  __virtual_base = 0xffff000000000000;
+  __virtual_base = 0xffffffff80000000;
   __physical_base = 0x900200000;
   . = __virtual_base;
   .text : AT(__physical_base) ALIGN(0x1000) {

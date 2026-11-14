@@ -2,6 +2,7 @@
 
 #define PAGE_SIZE 0x1000ULL
 #define BLOCK_SIZE 0x200000ULL
+#define BASE_REVISION_ZERO_IDENTITY_SIZE 0x100000000ULL
 #define TABLE_POOL_OFFSET 0x300000ULL
 #define TABLE_POOL_SIZE 0x200000ULL
 #define MAX_MAP_RANGES 512
@@ -141,7 +142,7 @@ static int map_ram_range(page_table_state *state, range region, uint64_t virtual
         aligned.length - 1 > ~0ULL - (virtual_offset + aligned.base)) return 0;
     uint64_t address = aligned.base;
     uint64_t end = address + aligned.length;
-    uint64_t attributes = page_attributes(ATTR_NORMAL_WB, PF_W);
+    uint64_t attributes = page_attributes(ATTR_NORMAL_WB, PF_W | PF_X);
     while (address < end) {
         uint64_t remaining = end - address;
         uint64_t virtual_address = virtual_offset + address;
@@ -188,7 +189,7 @@ static int map_kernel_segment(page_table_state *state,
         physical.length != virtual.length ||
         physical.base > state->max_physical_address ||
         physical.length > state->max_physical_address - physical.base ||
-        segment->virtual_base < 0xffff000000000000ULL)
+        segment->virtual_base < 0xffffffff80000000ULL)
         return 0;
 
     uint64_t attributes = page_attributes(ATTR_NORMAL_WB, segment->flags);
@@ -248,18 +249,26 @@ int byter_aarch64_build_page_tables(
             identity_count == MAX_MAP_RANGES) return 0;
         identity_ranges[identity_count++] = aligned;
     }
-    if (!subtract_range(identity_ranges, &identity_count, shim_pages) ||
-        (has_framebuffer && !subtract_range(identity_ranges, &identity_count, framebuffer_pages)))
+    range low_identity_ranges[1] = {{PAGE_SIZE, BASE_REVISION_ZERO_IDENTITY_SIZE - PAGE_SIZE}};
+    uint32_t low_identity_count = 1;
+    if (!subtract_range(identity_ranges, &identity_count, (range){0, BASE_REVISION_ZERO_IDENTITY_SIZE}) ||
+        !subtract_range(identity_ranges, &identity_count, shim_pages) ||
+        (has_framebuffer && !subtract_range(identity_ranges, &identity_count, framebuffer_pages)) ||
+        (has_framebuffer && !subtract_range(low_identity_ranges, &low_identity_count, framebuffer_pages)))
         return 0;
 
+    for (uint32_t i = 0; i < low_identity_count; ++i)
+        if (!map_ram_range(&state, low_identity_ranges[i], 0)) return 0;
     for (uint32_t i = 0; i < identity_count; ++i)
         if (!map_ram_range(&state, identity_ranges[i], 0)) return 0;
     if (!map_special_range(&state, (range){(uint64_t)shim, shim_size}, ATTR_NORMAL_WB,
                            PF_W | PF_X, 0)) return 0;
     if (has_framebuffer && !map_special_range(&state,
-        (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W, 0)) return 0;
+        (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W | PF_X, 0)) return 0;
 
     range hhdm_ranges[MAX_MAP_RANGES];
+    range low_hhdm_ranges[1] = {{0, BASE_REVISION_ZERO_IDENTITY_SIZE}};
+    uint32_t low_hhdm_count = 1;
     uint32_t hhdm_count = 0;
     for (uint32_t i = 0; i < memory_count; ++i) {
         range aligned;
@@ -267,18 +276,24 @@ int byter_aarch64_build_page_tables(
             hhdm_count == MAX_MAP_RANGES) return 0;
         hhdm_ranges[hhdm_count++] = aligned;
     }
-    if (has_framebuffer && !subtract_range(hhdm_ranges, &hhdm_count, framebuffer_pages)) return 0;
+    if (!subtract_range(hhdm_ranges, &hhdm_count,
+                        (range){0, BASE_REVISION_ZERO_IDENTITY_SIZE}) ||
+        (has_framebuffer && !subtract_range(hhdm_ranges, &hhdm_count, framebuffer_pages)) ||
+        (has_framebuffer && !subtract_range(low_hhdm_ranges, &low_hhdm_count, framebuffer_pages)))
+        return 0;
+    for (uint32_t i = 0; i < low_hhdm_count; ++i)
+        if (!map_ram_range(&state, low_hhdm_ranges[i], BYTER_AARCH64_HHDM_OFFSET)) return 0;
     for (uint32_t i = 0; i < hhdm_count; ++i)
         if (!map_ram_range(&state, hhdm_ranges[i], BYTER_AARCH64_HHDM_OFFSET)) return 0;
     if (has_framebuffer && !map_special_range(&state,
-        (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W,
+        (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W | PF_X,
         BYTER_AARCH64_HHDM_OFFSET)) return 0;
     for (uint32_t i = 0; i < segment_count; ++i)
         if (!map_kernel_segment(&state, &segments[i])) return 0;
 
-    uint64_t tcr = 16ULL | (1ULL << 8) | (1ULL << 10) | (3ULL << 12) |
+    uint64_t tcr = 16ULL | (1ULL << 8) | (1ULL << 10) | (2ULL << 12) |
                    (16ULL << 16) | (1ULL << 24) | (1ULL << 26) |
-                   (3ULL << 28) | (2ULL << 30) | ((uint64_t)state.pa_range << 32);
+                   (2ULL << 28) | (2ULL << 30) | ((uint64_t)state.pa_range << 32);
     for (uint64_t offset = 0; offset < state.used_pages * PAGE_SIZE; offset += 64)
         __asm__ volatile("dc cvac, %0" :: "r"(pool_base + offset) : "memory");
     __asm__ volatile("dsb sy" ::: "memory");

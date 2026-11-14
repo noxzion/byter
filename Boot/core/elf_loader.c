@@ -10,7 +10,7 @@ typedef unsigned long long u64;
 #define MAX_RANGES 256
 #define MAX_OUT_RANGES 512
 #define MAX_PHDRS 128
-#define MAX_MAP_BOUNDARIES (2 + 2 * (MAX_RANGES + MAX_PHDRS + MAX_OUT_RANGES + 4))
+#define MAX_MAP_BOUNDARIES (2 + 2 * (MAX_RANGES + MAX_PHDRS + MAX_OUT_RANGES + 6))
 #define MAX_IMAGE_SIZE (64ULL * 1024 * 1024)
 #define MAX_ELF_MEMORY (256ULL * 1024 * 1024)
 #define HANDOFF_OFFSET 0x100000ULL
@@ -24,6 +24,68 @@ typedef struct {
     u8 red_size, red_shift, green_size, green_shift, blue_size, blue_shift;
     u8 format_valid;
 } framebuffer_info;
+static framebuffer_info status_framebuffer;
+
+enum {
+    STAGE_SHIM = 0x2563eb,
+    STAGE_DTB = 0x06b6d4,
+    STAGE_ELF_VALID = 0xeab308,
+    STAGE_ELF_LOADED = 0xf97316,
+    STAGE_BASE_REVISION = 0xa855f7,
+    STAGE_ABI_READY = 0xd946ef,
+    STAGE_TABLES = 0x14b8a6,
+    STAGE_EL2_DROP = 0xdc2626,
+    STAGE_HANDOFF = 0xffffff,
+};
+
+static void set_status_framebuffer(const struct byter_framebuffer *fb) {
+    if (!fb) return;
+    status_framebuffer = (framebuffer_info){
+        .address = (u64)fb->address,
+        .size = fb->pitch * fb->height,
+        .width = fb->width,
+        .height = fb->height,
+        .pitch = fb->pitch,
+        .red_size = fb->red_mask_size,
+        .red_shift = fb->red_mask_shift,
+        .green_size = fb->green_mask_size,
+        .green_shift = fb->green_mask_shift,
+        .blue_size = fb->blue_mask_size,
+        .blue_shift = fb->blue_mask_shift,
+        .format_valid = fb->memory_model == BYTER_FRAMEBUFFER_RGB && fb->bpp == 32,
+    };
+}
+
+static void show_boot_stage(u32 color) {
+    framebuffer_info *fb = &status_framebuffer;
+    if (!fb->format_valid || !fb->address || fb->width < 32 || fb->height < 32 ||
+        fb->width > 16384 || fb->height > 16384 || fb->pitch < fb->width * 4 ||
+        fb->pitch % 4 || fb->height > ~0ULL / fb->pitch ||
+        fb->size < fb->pitch * fb->height) return;
+
+    u32 pixel = (((color >> 16) & 0xff) << fb->red_shift) |
+                (((color >> 8) & 0xff) << fb->green_shift) |
+                ((color & 0xff) << fb->blue_shift);
+    u32 side = fb->width < fb->height ? (u32)fb->width : (u32)fb->height;
+    if (side > 160) side = 160;
+    u32 left = ((u32)fb->width - side) / 2;
+    u32 top = ((u32)fb->height - side) / 2;
+    volatile u32 *pixels = (volatile u32 *)(u64)fb->address;
+    u32 stride = (u32)(fb->pitch / 4);
+    for (u32 y = 0; y < side; ++y)
+        for (u32 x = 0; x < side; ++x)
+            pixels[(top + y) * stride + left + x] = pixel;
+    __asm__ volatile("dsb sy" ::: "memory");
+}
+
+void byter_shim_handoff_stage(void) {
+    show_boot_stage(STAGE_HANDOFF);
+}
+
+void byter_shim_el2_drop_stage(void) {
+    show_boot_stage(STAGE_EL2_DROP);
+}
+
 typedef struct { u32 type, flags; u64 offset, vaddr, paddr, filesz, memsz, align; } elf_program;
 typedef struct {
     u8 ident[16]; u16 type, machine; u32 version; u64 entry, phoff, shoff;
@@ -290,6 +352,17 @@ static int page_aligned_range(range input, range *output) {
     return output->length != 0;
 }
 
+static int page_aligned_inward_range(range input, range *output) {
+    if (!input.length || input.base > ~0ULL - input.length) return 0;
+    u64 end = input.base + input.length;
+    if (input.base > ~0ULL - 0xfff) return 0;
+    u64 start = (input.base + 0xfff) & ~0xfffULL;
+    end &= ~0xfffULL;
+    if (end <= start) return 0;
+    *output = (range){start, end - start};
+    return 1;
+}
+
 static int normalize_memory(range *memory, u32 *count) {
     for (u32 i = 1; i < *count; ++i) {
         range current = memory[i];
@@ -364,6 +437,7 @@ static int append_map_entry(struct byter_memmap_entry *entries, u32 *count,
 static int build_memory_map(range *memory, u32 memory_count,
                             range *reserved, u32 reserved_count,
                             range shim, range dtb, range *segments, u32 segment_count,
+                            range executable_image,
                             range framebuffer, int has_framebuffer,
                             range *usable, u32 usable_count,
                             struct byter_memmap_entry *entries, u32 *entry_count) {
@@ -380,6 +454,8 @@ static int build_memory_map(range *memory, u32 memory_count,
             !add_map_boundaries(boundaries, &boundary_count, ram, dtb)) return 0;
         for (u32 i = 0; i < segment_count; ++i)
             if (!add_map_boundaries(boundaries, &boundary_count, ram, segments[i])) return 0;
+        if (!add_map_boundaries(boundaries, &boundary_count, ram, executable_image) ||
+            !add_map_boundaries(boundaries, &boundary_count, ram, (range){0, 0x1000})) return 0;
         if (has_framebuffer && !add_map_boundaries(boundaries, &boundary_count, ram, framebuffer)) return 0;
         for (u32 i = 0; i < usable_count; ++i)
             if (!add_map_boundaries(boundaries, &boundary_count, ram, usable[i])) return 0;
@@ -402,8 +478,10 @@ static int build_memory_map(range *memory, u32 memory_count,
                 type = BYTER_MEMMAP_BOOTLOADER_RECLAIMABLE;
             for (u32 j = 0; j < segment_count; ++j)
                 if (contains_range(segments[j], piece)) { type = BYTER_MEMMAP_EXECUTABLE_AND_MODULES; break; }
+            if (contains_range(executable_image, piece)) type = BYTER_MEMMAP_EXECUTABLE_AND_MODULES;
             if (has_framebuffer && contains_range(framebuffer, piece))
                 type = BYTER_MEMMAP_FRAMEBUFFER;
+            if (contains_range((range){0, 0x1000}, piece)) type = BYTER_MEMMAP_RESERVED;
             if (!append_map_entry(entries, entry_count, piece, type)) return 0;
         }
     }
@@ -501,6 +579,35 @@ static void find_request_window(range *segments, u32 count, u64 *window_start,
     }
 }
 
+static int resolve_base_revision(range *segments, u32 count) {
+    u64 window_start, window_end;
+    find_request_window(segments, count, &window_start, &window_end);
+    const u64 magic[2] = {0xf9562b2d5c95a6c8ULL, 0x6a7b384944536bdcULL};
+    u64 *base_revision = 0;
+    for (u32 i = 0; i < count; ++i) {
+        range segment = segments[i];
+        if (!segment.length || segment.base > ~0ULL - segment.length) continue;
+        u64 end = segment.base + segment.length;
+        u64 start = segment.base > window_start ? segment.base : window_start;
+        if (start > ~0ULL - 7) continue;
+        u64 address = (start + 7) & ~7ULL;
+        while (address <= end && end - address >= 3 * sizeof(u64) &&
+               address <= window_end && window_end - address >= 3 * sizeof(u64)) {
+            u64 *candidate = (u64 *)(u64)address;
+            if (candidate[0] == magic[0] && candidate[1] == magic[1]) {
+                if (base_revision || candidate[2] != 0) return 0;
+                base_revision = candidate;
+            }
+            address += sizeof(u64);
+        }
+    }
+    if (base_revision) {
+        base_revision[1] = 0; /* Base revision 0 was selected. */
+        base_revision[2] = 0; /* The requested base revision is supported. */
+    }
+    return 1;
+}
+
 static void resolve_requests(range *segments, u32 count,
                              struct byter_bootloader_info_response *bootloader_info,
                              struct byter_dtb_response *dtb,
@@ -560,10 +667,17 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     framebuffer_info framebuffer_data = {0};
     range memory[MAX_RANGES], reserved[MAX_RANGES];
     if ((u64)shim > ~0ULL - shim_size || file_size > shim_size) return 0;
+    struct byter_framebuffer early_framebuffer;
+    if (byter_a059_framebuffer_fallback(&early_framebuffer))
+        set_status_framebuffer(&early_framebuffer);
+    show_boot_stage(STAGE_SHIM);
     int fdt_valid = parse_fdt(dtb, &dtb_size, memory, &memory_count, reserved,
                               &reserved_count, &framebuffer_data);
     if (!fdt_valid || (u64)dtb > ~0ULL - dtb_size) return 0;
     if (!normalize_memory(memory, &memory_count)) return 0;
+    range reserved_pages[MAX_RANGES];
+    for (u32 i = 0; i < reserved_count; ++i)
+        if (!page_aligned_range(reserved[i], &reserved_pages[i])) return 0;
     if (!framebuffer_data.format_valid) {
         struct byter_framebuffer fallback;
         if (byter_a059_framebuffer_fallback(&fallback)) {
@@ -583,6 +697,8 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
             };
         }
     }
+    status_framebuffer = framebuffer_data;
+    show_boot_stage(STAGE_DTB);
     if ((u64)elf < (u64)shim || (u64)elf - (u64)shim > file_size ||
         elf_size > file_size - ((u64)elf - (u64)shim)) return 0;
 
@@ -607,7 +723,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
         range physical_page, virtual_page;
         if ((p->paddr & 0xfff) != (p->vaddr & 0xfff) ||
             !page_aligned_range(r, &physical_page) || !page_aligned_range(vr, &virtual_page) ||
-            p->vaddr < 0xffff000000000000ULL || !in_memory(memory, memory_count, r) ||
+            p->vaddr < 0xffffffff80000000ULL || !in_memory(memory, memory_count, r) ||
             !in_memory(memory, memory_count, (range){(u64)shim, shim_size}) ||
             !in_memory(memory, memory_count, (range){(u64)dtb, dtb_size}) ||
             overlaps(r, (range){(u64)shim, shim_size}) ||
@@ -615,7 +731,8 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
         u64 segment_bias = p->vaddr - p->paddr;
         if (segment_count && segment_bias != load_bias) return 0;
         load_bias = segment_bias;
-        for (u32 j = 0; j < reserved_count; ++j) if (overlaps(r, reserved[j])) return 0;
+        for (u32 j = 0; j < reserved_count; ++j)
+            if (overlaps(physical_page, reserved_pages[j])) return 0;
         for (u32 j = 0; j < segment_count; ++j)
             if (overlaps(physical_page, physical_page_ranges[j]) ||
                 overlaps(virtual_page, virtual_page_ranges[j])) return 0;
@@ -635,22 +752,54 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
         if ((p->flags & 1) && eh->entry >= vr.base && eh->entry - vr.base < vr.length) entry_ok = 1;
     }
     if (!segment_count || !entry_ok || high <= low) return 0;
+    show_boot_stage(STAGE_ELF_VALID);
+
+    u64 image_low = ~0ULL, image_high = 0, image_size = 0;
+    for (u32 i = 0; i < segment_count; ++i) {
+        if (physical_page_ranges[i].base < image_low) image_low = physical_page_ranges[i].base;
+        if (physical_page_ranges[i].base + physical_page_ranges[i].length > image_high)
+            image_high = physical_page_ranges[i].base + physical_page_ranges[i].length;
+        if (physical_page_ranges[i].length > ~0ULL - image_size) return 0;
+        image_size += physical_page_ranges[i].length;
+    }
+    if (image_high <= image_low || image_size != image_high - image_low) return 0;
+    range executable_image = {image_low, image_size};
+    if (!in_memory(memory, memory_count, executable_image) ||
+        overlaps(executable_image, (range){(u64)shim, shim_size}) ||
+        overlaps(executable_image, (range){(u64)dtb, dtb_size})) return 0;
+    for (u32 i = 0; i < reserved_count; ++i)
+        if (overlaps(executable_image, reserved_pages[i])) return 0;
 
     range framebuffer_range = {framebuffer_data.address, framebuffer_data.size};
     int has_framebuffer = framebuffer_data.format_valid && framebuffer_range.length &&
         framebuffer_range.base <= ~0ULL - framebuffer_range.length;
     if (has_framebuffer && (overlaps(framebuffer_range, (range){(u64)shim, shim_size}) ||
         overlaps(framebuffer_range, (range){(u64)dtb, dtb_size}))) return 0;
-    for (u32 i = 0; i < segment_count; ++i)
-        if (has_framebuffer && overlaps(framebuffer_range, segments[i])) return 0;
+    if (has_framebuffer && overlaps(framebuffer_range, executable_image)) return 0;
 
-    range usable[MAX_OUT_RANGES]; u32 usable_count = memory_count;
-    for (u32 i = 0; i < memory_count; ++i) usable[i] = memory[i];
-    for (u32 i = 0; i < reserved_count; ++i) if (!subtract_range(usable, &usable_count, reserved[i])) return 0;
-    if (!subtract_range(usable, &usable_count, (range){(u64)shim, shim_size}) ||
-        !subtract_range(usable, &usable_count, (range){(u64)dtb, dtb_size})) return 0;
-    for (u32 i = 0; i < segment_count; ++i) if (!subtract_range(usable, &usable_count, segments[i])) return 0;
-    if (has_framebuffer && !subtract_range(usable, &usable_count, framebuffer_range)) return 0;
+    range shim_pages, dtb_pages;
+    if (!page_aligned_range((range){(u64)shim, shim_size}, &shim_pages) ||
+        !page_aligned_range((range){(u64)dtb, dtb_size}, &dtb_pages)) return 0;
+    range framebuffer_pages = {0};
+    if (has_framebuffer && !page_aligned_range(framebuffer_range, &framebuffer_pages)) return 0;
+    if (has_framebuffer && (overlaps(framebuffer_pages, shim_pages) ||
+        overlaps(framebuffer_pages, dtb_pages) || overlaps(framebuffer_pages, executable_image))) return 0;
+
+    range usable[MAX_OUT_RANGES]; u32 usable_count = 0;
+    for (u32 i = 0; i < memory_count; ++i) {
+        range aligned;
+        if (page_aligned_inward_range(memory[i], &aligned)) {
+            if (usable_count == MAX_OUT_RANGES) return 0;
+            usable[usable_count++] = aligned;
+        }
+    }
+    for (u32 i = 0; i < reserved_count; ++i)
+        if (!subtract_range(usable, &usable_count, reserved_pages[i])) return 0;
+    if (!subtract_range(usable, &usable_count, shim_pages) ||
+        !subtract_range(usable, &usable_count, dtb_pages)) return 0;
+    if (!subtract_range(usable, &usable_count, executable_image) ||
+        !subtract_range(usable, &usable_count, (range){0, 0x1000})) return 0;
+    if (has_framebuffer && !subtract_range(usable, &usable_count, framebuffer_pages)) return 0;
 
     if (shim_size < HANDOFF_OFFSET + HANDOFF_SIZE + STACK_SIZE + 0x10000) return 0;
     u8 *handoff = shim + shim_size - HANDOFF_OFFSET;
@@ -666,9 +815,9 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     struct byter_memmap_entry **memmap_entry_pointers = (void *)(memmap_entries + MAX_OUT_RANGES);
     if ((u8 *)(memmap_entry_pointers + MAX_OUT_RANGES) > handoff + HANDOFF_SIZE) return 0;
     u32 memmap_count = 0;
-    if (!build_memory_map(memory, memory_count, reserved, reserved_count,
-                          (range){(u64)shim, shim_size}, (range){(u64)dtb, dtb_size},
-                          segments, segment_count, framebuffer_range, has_framebuffer,
+    if (!build_memory_map(memory, memory_count, reserved_pages, reserved_count,
+                          shim_pages, dtb_pages,
+                          segments, segment_count, executable_image, framebuffer_pages, has_framebuffer,
                           usable, usable_count, memmap_entries, &memmap_count)) return 0;
     struct byter_aarch64_range page_table_memory[MAX_RANGES];
     for (u32 i = 0; i < memory_count; ++i)
@@ -731,10 +880,16 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
         zero_bytes(dst + p->filesz, p->memsz - p->filesz);
         flush_loaded_segment((range){p->paddr, p->memsz}, !!(p->flags & 1));
     }
+    show_boot_stage(STAGE_ELF_LOADED);
+
+    if (!resolve_base_revision(segments, segment_count)) return 0;
+    show_boot_stage(STAGE_BASE_REVISION);
 
     resolve_requests(segments, segment_count, bootloader_info, dtb_response,
                      hhdm_response, framebuffer_result, memmap_response,
                      executable_address_response, hhdm_offset);
+    show_boot_stage(STAGE_ABI_READY);
+    show_boot_stage(STAGE_TABLES);
     boot_context *context = (boot_context *)(handoff + HANDOFF_SIZE - sizeof(*context));
     *context = (boot_context){eh->entry, page_tables.ttbr0, page_tables.ttbr1, page_tables.tcr};
     return (u64)context;
