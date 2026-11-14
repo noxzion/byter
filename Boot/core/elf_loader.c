@@ -7,6 +7,13 @@ typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
+void *memcpy(void *destination, const void *source, u64 length) {
+    volatile u8 *out = destination;
+    const u8 *in = source;
+    for (u64 i = 0; i < length; ++i) out[i] = in[i];
+    return destination;
+}
+
 #define MAX_RANGES 512
 #define MAX_OUT_RANGES 512
 #define MAX_PHDRS 128
@@ -16,6 +23,7 @@ typedef unsigned long long u64;
 #define HANDOFF_OFFSET 0x100000ULL
 #define HANDOFF_SIZE 0x10000ULL
 #define STACK_SIZE 0x30000ULL
+#define MAX_CMDLINE_SIZE 1024ULL
 
 typedef struct { u64 base, length; } range;
 typedef struct { u64 entry, ttbr0, ttbr1, tcr; } boot_context;
@@ -117,7 +125,7 @@ typedef struct {
     u32 flags; u16 ehsize, phentsize, phnum, shentsize, shnum, shstrndx;
 } elf_header;
 void *memset(void *dst, int value, unsigned long size) {
-    u8 *p = (u8 *)dst;
+    volatile u8 *p = (volatile u8 *)dst;
     for (unsigned long i = 0; i < size; ++i) p[i] = (u8)value;
     return dst;
 }
@@ -853,6 +861,7 @@ static int resolve_base_revision(range *segments, u32 count) {
 
 static void resolve_requests(range *segments, u32 count,
                              struct byter_bootloader_info_response *bootloader_info,
+                             struct byter_executable_cmdline_response *cmdline,
                              struct byter_dtb_response *dtb,
                              struct byter_hhdm_response *hhdm,
                              struct byter_framebuffer_response *framebuffer,
@@ -887,6 +896,8 @@ static void resolve_requests(range *segments, u32 count,
             if (*revision == 0) {
                 if (has_id(id, (const u64[])BYTER_BOOTLOADER_INFO_REQUEST_ID))
                     *response = hhdm_pointer((u64)bootloader_info, hhdm_offset);
+                else if (has_id(id, (const u64[])BYTER_EXECUTABLE_CMDLINE_REQUEST_ID))
+                    *response = hhdm_pointer((u64)cmdline, hhdm_offset);
                 else if (has_id(id, (const u64[])BYTER_DTB_REQUEST_ID))
                     *response = hhdm_pointer((u64)dtb, hhdm_offset);
                 else if (has_id(id, (const u64[])BYTER_HHDM_REQUEST_ID))
@@ -905,12 +916,19 @@ static void resolve_requests(range *segments, u32 count,
 }
 
 /* Returns the ELF entry address, or zero on any validation/loading failure. */
-u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64 file_size) {
+u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
+                    u64 file_size, u8 *cmdline, u64 cmdline_size) {
     u32 dtb_size = 0, memory_count = 0, reserved_count = 0;
     u32 root_address_cells = 0, root_size_cells = 0;
     framebuffer_info framebuffer_data = {0};
     range memory[MAX_RANGES], reserved[MAX_RANGES];
     if ((u64)shim > ~0ULL - shim_size || file_size > shim_size) return 0;
+    if (!cmdline || !cmdline_size || cmdline_size > MAX_CMDLINE_SIZE + 1 ||
+        (u64)cmdline < (u64)shim || (u64)cmdline - (u64)shim > file_size ||
+        cmdline_size > file_size - ((u64)cmdline - (u64)shim) ||
+        cmdline[cmdline_size - 1] != 0) return 0;
+    for (u64 i = 0; i + 1 < cmdline_size; ++i)
+        if (cmdline[i] == 0) return 0;
     struct byter_framebuffer early_framebuffer;
     if (byter_a059_framebuffer_fallback(&early_framebuffer))
         set_status_framebuffer(&early_framebuffer);
@@ -1057,7 +1075,8 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     if (shim_size < HANDOFF_OFFSET + HANDOFF_SIZE + STACK_SIZE + 0x10000) return 0;
     u8 *handoff = shim + shim_size - HANDOFF_OFFSET;
     struct byter_bootloader_info_response *bootloader_info = (void *)handoff;
-    struct byter_dtb_response *dtb_response = (void *)(bootloader_info + 1);
+    struct byter_executable_cmdline_response *cmdline_response = (void *)(bootloader_info + 1);
+    struct byter_dtb_response *dtb_response = (void *)(cmdline_response + 1);
     struct byter_framebuffer_response *framebuffer_response = (void *)(dtb_response + 1);
     struct byter_hhdm_response *hhdm_response = (void *)(framebuffer_response + 1);
     struct byter_memmap_response *memmap_response = (void *)(hhdm_response + 1);
@@ -1117,6 +1136,8 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
         .name = (char *)(u64)hhdm_pointer((u64)byter_name, hhdm_offset),
         .version = (char *)(u64)hhdm_pointer((u64)byter_version, hhdm_offset)
     };
+    cmdline_response->revision = 0;
+    cmdline_response->cmdline = (char *)(u64)hhdm_pointer((u64)cmdline, hhdm_offset);
     *dtb_response = (struct byter_dtb_response){
         .revision = 0,
         .dtb_ptr = (void *)(u64)hhdm_pointer((u64)dtb, hhdm_offset)
@@ -1158,7 +1179,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     if (!resolve_base_revision(segments, segment_count)) return 0;
     show_boot_stage(STAGE_BASE_REVISION);
 
-    resolve_requests(segments, segment_count, bootloader_info, dtb_response,
+    resolve_requests(segments, segment_count, bootloader_info, cmdline_response, dtb_response,
                      hhdm_response, framebuffer_result, memmap_response,
                      executable_address_response, hhdm_offset);
     show_boot_stage(STAGE_ABI_READY);

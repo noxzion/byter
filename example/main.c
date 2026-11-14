@@ -24,6 +24,11 @@ static volatile struct byter_memmap_request memmap_request BYTER_REQUEST = {
     .revision = 0,
 };
 
+static volatile struct byter_executable_cmdline_request cmdline_request BYTER_REQUEST = {
+    .id = BYTER_EXECUTABLE_CMDLINE_REQUEST_ID,
+    .revision = 0,
+};
+
 static volatile struct byter_dtb_request dtb_request BYTER_REQUEST = {
     .id = BYTER_DTB_REQUEST_ID,
     .revision = 0,
@@ -67,6 +72,13 @@ static int valid_memory_map(const struct byter_memmap_response *map) {
         if (entry->type == BYTER_MEMMAP_EXECUTABLE_AND_MODULES) has_kernel = 1;
     }
     return has_usable && has_bootloader && has_kernel;
+}
+
+static int valid_cmdline(const struct byter_executable_cmdline_response *response) {
+    if (!response || response->revision != 0 || !response->cmdline) return 0;
+    for (uint32_t i = 0; i <= 1024; ++i)
+        if (!response->cmdline[i]) return 1;
+    return 0;
 }
 
 static int valid_executable_address(const struct byter_executable_address_response *address,
@@ -177,6 +189,11 @@ void _start(void) {
     struct byter_memmap_response *memmap = memmap_request.response;
     if (!valid_memory_map(memmap)) wait_forever();
     show_stage(fb, 0xec, 0x48, 0x99); /* Memory map accepted. */
+
+    if (!valid_cmdline(cmdline_request.response)) {
+        show_stage(fb, 0xff, 0x00, 0x00); /* Command line response invalid. */
+        wait_forever();
+    }
 
     if (!valid_executable_address(executable_address_request.response, memmap))
         wait_forever();

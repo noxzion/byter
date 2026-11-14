@@ -32,6 +32,7 @@ claim full Limine Boot Protocol compatibility.
 | Request | Request revision | Response revision | Fields provided | Source and limits |
 | --- | ---: | ---: | --- | --- |
 | `BYTER_BOOTLOADER_INFO_REQUEST_ID` | 0 | 0 | `name`, `version` | Static strings `Byter AArch64 shim` and `0.1`. |
+| `BYTER_EXECUTABLE_CMDLINE_REQUEST_ID` | 0 | 0 | `cmdline` | NUL-terminated UTF-8 command line from the selected build config; limited to 1024 bytes. |
 | `BYTER_DTB_REQUEST_ID` | 0 | 0 | `dtb_ptr` | Original DTB pointer received from ABL. The response does not provide a DTB size. |
 | `BYTER_FRAMEBUFFER_REQUEST_ID` | 0 | 0 | One framebuffer pointer and its address, dimensions, pitch, bpp, RGB masks, and memory model | Parsed from a DTB `simple-framebuffer` node; otherwise the A059 fallback profile. If no framebuffer is available, `response` remains `NULL`. EDID and video modes are not provided. |
 | `BYTER_HHDM_REQUEST_ID` | 0 | 0 | `offset` | Fixed AArch64 HHDM base `0xffff800000000000`; maps the first 4 GiB, DTB RAM, framebuffer, and known reserved ranges above 4 GiB. |
@@ -103,7 +104,7 @@ their responses. Requests using them receive `response == NULL`:
 
 | Request | Request | Request |
 | --- | --- | --- |
-| `BYTER_EXECUTABLE_CMDLINE_REQUEST_ID` | `BYTER_FIRMWARE_TYPE_REQUEST_ID` | `BYTER_STACK_SIZE_REQUEST_ID` |
+| `BYTER_FIRMWARE_TYPE_REQUEST_ID` | `BYTER_STACK_SIZE_REQUEST_ID` | — |
 | `BYTER_FLANTERM_FB_INIT_PARAMS_REQUEST_ID` | `BYTER_PAGING_MODE_REQUEST_ID` | `BYTER_MP_REQUEST_ID` |
 | `BYTER_ENTRY_POINT_REQUEST_ID` | `BYTER_EXECUTABLE_FILE_REQUEST_ID` | `BYTER_RSDP_REQUEST_ID` |
 | `BYTER_MODULE_REQUEST_ID` | `BYTER_SMBIOS_REQUEST_ID` | `BYTER_EFI_SYSTEM_TABLE_REQUEST_ID` |

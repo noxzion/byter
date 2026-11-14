@@ -22,6 +22,12 @@ make          # собрать Boot/build/byter-boot.img
 make boot     # собрать и запустить в RAM
 ```
 
+По умолчанию сборка читает `Boot/byter.cfg`: `kernel=` выбирает ELF, а
+`cmdline=` задаёт строку, которую ядро получает через executable-cmdline request.
+Путь `kernel=` считается относительно файла конфига. Можно выбрать другой конфиг
+командой `make boot CONFIG=Boot/dev.cfg`; параметр
+`ELF=/путь/ядро.elf` переопределяет kernel из конфига.
+
 `example/` — демонстрационное ядро загрузчика, а не основная часть Byter. Сейчас
 оно проверяет ответы framebuffer, memory map, executable address и наличие
 переведённого DTB `reg`-ресурса в memory map, выполняет EL1 SVC с возвратом через

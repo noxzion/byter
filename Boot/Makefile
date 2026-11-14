@@ -3,7 +3,7 @@ LLD ?= ld.lld
 OBJCOPY ?= llvm-objcopy
 MKBOOTIMG ?= mkbootimg
 OUT ?= build
-ELF ?= $(OUT)/kernel.elf
+CONFIG ?= byter.cfg
 CFLAGS := --target=aarch64-none-elf -O2 -ffreestanding -nostdlib -fpie -fno-builtin -fno-stack-protector -mgeneral-regs-only -mstrict-align -Wall -Wextra -Werror -I. -Iinclude
 
 ARCH := arch/aarch64
@@ -51,14 +51,14 @@ $(OUT)/kernel.elf: $(OUT)/kernel.o $(OUT)/fdt_diag.o $(OUT)/kernel_vectors.o ../
 
 FORCE:
 
-$(OUT)/byter-boot.img: FORCE $(OUT)/boot-shim.bin $(ELF) $(PACKER)
-	python3 $(PACKER) --shim $(OUT)/boot-shim.bin --elf $(ELF) --kernel-out $(OUT)/byter-kernel.img --boot-out $@ --mkbootimg $(MKBOOTIMG)
+$(OUT)/byter-boot.img: FORCE $(OUT)/boot-shim.bin $(OUT)/kernel.elf $(if $(ELF),$(ELF)) $(CONFIG) $(PACKER)
+	python3 $(PACKER) --shim $(OUT)/boot-shim.bin --config $(CONFIG) $(if $(ELF),--elf $(ELF)) --kernel-out $(OUT)/byter-kernel.img --boot-out $@ --mkbootimg $(MKBOOTIMG)
 
 boot: image
 	fastboot boot $(OUT)/byter-boot.img
 
-$(OUT)/byter-diagnostic.img: FORCE $(OUT)/boot-shim.bin $(ELF) $(PACKER)
-	python3 $(PACKER) --shim $(OUT)/boot-shim.bin --elf $(ELF) --kernel-out $(OUT)/byter-diagnostic-kernel.img --boot-out $@ --mkbootimg $(MKBOOTIMG)
+$(OUT)/byter-diagnostic.img: FORCE $(OUT)/boot-shim.bin $(OUT)/kernel.elf $(if $(ELF),$(ELF)) $(CONFIG) $(PACKER)
+	python3 $(PACKER) --shim $(OUT)/boot-shim.bin --config $(CONFIG) $(if $(ELF),--elf $(ELF)) --kernel-out $(OUT)/byter-diagnostic-kernel.img --boot-out $@ --mkbootimg $(MKBOOTIMG)
 
 diagnostic: $(OUT)/byter-diagnostic.img
 	fastboot boot $(OUT)/byter-diagnostic.img

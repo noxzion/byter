@@ -5,6 +5,8 @@
 	.global elf_offset_field
 	.global elf_size_field
 	.global file_size_field
+	.global cmdline_offset_field
+	.global cmdline_size_field
 _head:
 	b _start
 	.long 0
@@ -21,6 +23,10 @@ elf_size_field:
 	.quad 0                    /* 80: patched ELF byte size */
 file_size_field:
 	.quad 0                    /* 88: patched complete Image size */
+cmdline_offset_field:
+	.quad 0                    /* 96: command line offset within the Image */
+cmdline_size_field:
+	.quad 0                    /* 104: command line size including NUL */
 
 _start:
 	msr daifset, #0xf
@@ -36,6 +42,9 @@ _start:
 	mov x1, x20
 	movz x4, #0x400, lsl #16
 	ldr x5, file_size_field
+	ldr x6, cmdline_offset_field
+	add x6, x19, x6
+	ldr x7, cmdline_size_field
 	mrs x9, CurrentEL
 	cmp x9, #0x4
 	b.eq .Lcheck_el1

@@ -1,4 +1,5 @@
 .DEFAULT_GOAL := all
+CONFIG ?= Boot/byter.cfg
 
 .PHONY: help all image kernel boot diagnostic doctor clean
 
@@ -7,6 +8,7 @@ help:
 	               'make kernel  собрать ELF-ядро' \
 	               'make boot    собрать и запустить через fastboot boot' \
 	               'make boot ELF=/path/kernel.elf  загрузить своё ELF' \
+	               'make boot CONFIG=Boot/byter.cfg  загрузить ELF по конфигу' \
 	               'make diagnostic  собрать и запустить отдельный диагностический образ' \
 	               'make doctor  проверить инструменты сборки' \
 	               'make clean   удалить результаты сборки'
@@ -14,16 +16,16 @@ help:
 all: image
 
 image:
-	$(MAKE) -C Boot image $(if $(ELF),ELF=$(abspath $(ELF)))
+	$(MAKE) -C Boot image CONFIG=$(abspath $(CONFIG)) $(if $(ELF),ELF=$(abspath $(ELF)))
 
 kernel:
 	$(MAKE) -C Boot kernel
 
 boot:
-	$(MAKE) -C Boot boot $(if $(ELF),ELF=$(abspath $(ELF)))
+	$(MAKE) -C Boot boot CONFIG=$(abspath $(CONFIG)) $(if $(ELF),ELF=$(abspath $(ELF)))
 
 diagnostic:
-	$(MAKE) -C Boot diagnostic $(if $(ELF),ELF=$(abspath $(ELF)))
+	$(MAKE) -C Boot diagnostic CONFIG=$(abspath $(CONFIG)) $(if $(ELF),ELF=$(abspath $(ELF)))
 
 doctor:
 	@status=0; for tool in clang ld.lld llvm-objcopy mkbootimg fastboot python3; do \

@@ -16,6 +16,9 @@ include/byter.h           публичные структуры и ID Byter ABI
 Собрать образ можно из корня проекта командой `make`; результат появится в
 `Boot/build/byter-boot.img`. `make boot` дополнительно запускает его через
 Fastboot. Передаётся только временный RAM-образ, разделы не прошиваются.
+`Boot/byter.cfg` задаёт ELF и `cmdline`; другой файл можно выбрать через
+`make boot CONFIG=Boot/dev.cfg`, а `ELF=/путь/ядро.elf` переопределяет конфиг.
+Сейчас конфиг читается при сборке образа и его cmdline встраивается в RAM-образ.
 
 Пример ядра в `example/main.c` проверяет ответы framebuffer, memory map и
 executable address, затем рисует цветной квадрат.
