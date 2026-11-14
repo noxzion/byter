@@ -425,6 +425,35 @@ static int normalize_memory(range *memory, u32 *count) {
     return normalized != 0;
 }
 
+static int normalize_ranges(range *ranges, u32 *count) {
+    for (u32 i = 1; i < *count; ++i) {
+        range current = ranges[i];
+        u32 j = i;
+        while (j && ranges[j - 1].base > current.base) {
+            ranges[j] = ranges[j - 1];
+            --j;
+        }
+        ranges[j] = current;
+    }
+    u32 normalized = 0;
+    for (u32 i = 0; i < *count; ++i) {
+        range current = ranges[i];
+        if (!current.length || current.base > ~0ULL - current.length) return 0;
+        if (normalized) {
+            range *previous = &ranges[normalized - 1];
+            u64 previous_end = previous->base + previous->length;
+            u64 current_end = current.base + current.length;
+            if (current.base <= previous_end) {
+                if (current_end > previous_end) previous->length = current_end - previous->base;
+                continue;
+            }
+        }
+        ranges[normalized++] = current;
+    }
+    *count = normalized;
+    return 1;
+}
+
 static int contains_range(range region, range candidate) {
     return candidate.base >= region.base && candidate.base <= ~0ULL - candidate.length &&
            region.base <= ~0ULL - region.length &&
@@ -464,6 +493,35 @@ static int append_map_entry(struct byter_memmap_entry *entries, u32 *count,
     }
     if (*count == MAX_OUT_RANGES) return 0;
     entries[(*count)++] = (struct byter_memmap_entry){region.base, region.length, type};
+    return 1;
+}
+
+static int sort_and_merge_map_entries(struct byter_memmap_entry *entries, u32 *count) {
+    for (u32 i = 1; i < *count; ++i) {
+        struct byter_memmap_entry current = entries[i];
+        u32 j = i;
+        while (j && entries[j - 1].base > current.base) {
+            entries[j] = entries[j - 1];
+            --j;
+        }
+        entries[j] = current;
+    }
+    u32 normalized = 0;
+    for (u32 i = 0; i < *count; ++i) {
+        struct byter_memmap_entry current = entries[i];
+        if (!current.length || current.base > ~0ULL - current.length) return 0;
+        if (normalized) {
+            struct byter_memmap_entry *previous = &entries[normalized - 1];
+            u64 previous_end = previous->base + previous->length;
+            if (current.base < previous_end) return 0;
+            if (current.base == previous_end && current.type == previous->type) {
+                previous->length += current.length;
+                continue;
+            }
+        }
+        entries[normalized++] = current;
+    }
+    *count = normalized;
     return 1;
 }
 
@@ -518,7 +576,20 @@ static int build_memory_map(range *memory, u32 memory_count,
             if (!append_map_entry(entries, entry_count, piece, type)) return 0;
         }
     }
-    return *entry_count != 0;
+
+    range outside_reservations[MAX_OUT_RANGES];
+    u32 outside_count = 0;
+    for (u32 i = 0; i < reserved_count; ++i) {
+        if (outside_count == MAX_OUT_RANGES) return 0;
+        outside_reservations[outside_count++] = reserved[i];
+    }
+    for (u32 i = 0; i < memory_count; ++i)
+        if (!subtract_range(outside_reservations, &outside_count, memory[i])) return 0;
+    if (!normalize_ranges(outside_reservations, &outside_count)) return 0;
+    for (u32 i = 0; i < outside_count; ++i)
+        if (!append_map_entry(entries, entry_count, outside_reservations[i], BYTER_MEMMAP_RESERVED)) return 0;
+
+    return *entry_count != 0 && sort_and_merge_map_entries(entries, entry_count);
 }
 
 static void copy_bytes(u8 *dst, const u8 *src, u64 length) {
@@ -711,6 +782,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     range reserved_pages[MAX_RANGES];
     for (u32 i = 0; i < reserved_count; ++i)
         if (!page_aligned_range(reserved[i], &reserved_pages[i])) return 0;
+    if (!normalize_ranges(reserved_pages, &reserved_count)) return 0;
     if (!framebuffer_data.format_valid) {
         struct byter_framebuffer fallback;
         if (byter_a059_framebuffer_fallback(&fallback)) {

@@ -35,7 +35,7 @@ claim full Limine Boot Protocol compatibility.
 | `BYTER_DTB_REQUEST_ID` | 0 | 0 | `dtb_ptr` | Original DTB pointer received from ABL. The response does not provide a DTB size. |
 | `BYTER_FRAMEBUFFER_REQUEST_ID` | 0 | 0 | One framebuffer pointer and its address, dimensions, pitch, bpp, RGB masks, and memory model | Parsed from a DTB `simple-framebuffer` node; otherwise the A059 fallback profile. If no framebuffer is available, `response` remains `NULL`. EDID and video modes are not provided. |
 | `BYTER_HHDM_REQUEST_ID` | 0 | 0 | `offset` | Fixed AArch64 HHDM base `0xffff800000000000`; maps the first 4 GiB, DTB RAM ranges, and framebuffer. |
-| `BYTER_MEMMAP_REQUEST_ID` | 0 | 0 | `entry_count`, pointer array of `{base, length, type}` entries | RAM ranges from DTB, split around `/reserved-memory`, FDT memory-reservation entries, shim, DTB, ELF `PT_LOAD` ranges, and framebuffer. Limited to 512 output entries; non-RAM address space and unrecognized device ranges are omitted. |
+| `BYTER_MEMMAP_REQUEST_ID` | 0 | 0 | `entry_count`, pointer array of `{base, length, type}` entries | RAM ranges from DTB, split around `/reserved-memory`, FDT memory-reservation entries, shim, DTB, ELF `PT_LOAD` ranges, and framebuffer. Known DTB reservation ranges outside RAM are also returned as `RESERVED`. Limited to 512 sorted, non-overlapping entries; unrecognized MMIO/device ranges are omitted. |
 | `BYTER_EXECUTABLE_ADDRESS_REQUEST_ID` | 0 | 0 | `physical_base`, `virtual_base` | Lowest loaded `PT_LOAD` physical and virtual bases. The loader accepts AArch64 `ET_EXEC` segments with a uniform load bias, page-compatible addresses, and non-overlapping mappings; the example uses a higher-half VMA. |
 
 The current handoff enters at EL1 with the MMU and caches enabled, using a
