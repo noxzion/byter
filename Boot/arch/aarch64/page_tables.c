@@ -219,9 +219,10 @@ int byter_aarch64_build_page_tables(
     const struct byter_aarch64_range *memory, uint32_t memory_count,
     struct byter_aarch64_range framebuffer, int has_framebuffer,
     const struct byter_aarch64_load_segment *segments, uint32_t segment_count,
-    struct byter_aarch64_page_tables *result) {
+    struct byter_aarch64_page_tables *result, uint32_t *failure_stage) {
+    if (failure_stage) *failure_stage = BYTER_PT_STAGE_INIT;
     if (!shim || !memory || !memory_count || !segments || !segment_count || !result ||
-        shim_size <= TABLE_POOL_OFFSET || shim_size < 0x400000ULL) return 0;
+        !failure_stage || shim_size <= TABLE_POOL_OFFSET || shim_size < 0x400000ULL) return 0;
 
     page_table_state state = {0};
     uint32_t pa_bits;
@@ -235,6 +236,7 @@ int byter_aarch64_build_page_tables(
     state.ttbr1 = allocate_table(&state);
     if (!state.ttbr0 || !state.ttbr1) return 0;
 
+    *failure_stage = BYTER_PT_STAGE_RANGES;
     range framebuffer_pages = {0};
     range shim_pages;
     if (!align_range((range){(uint64_t)shim, shim_size}, &shim_pages)) return 0;
@@ -257,6 +259,7 @@ int byter_aarch64_build_page_tables(
         (has_framebuffer && !subtract_range(low_identity_ranges, &low_identity_count, framebuffer_pages)))
         return 0;
 
+    *failure_stage = BYTER_PT_STAGE_IDENTITY;
     for (uint32_t i = 0; i < low_identity_count; ++i)
         if (!map_ram_range(&state, low_identity_ranges[i], 0)) return 0;
     for (uint32_t i = 0; i < identity_count; ++i)
@@ -281,6 +284,7 @@ int byter_aarch64_build_page_tables(
         (has_framebuffer && !subtract_range(hhdm_ranges, &hhdm_count, framebuffer_pages)) ||
         (has_framebuffer && !subtract_range(low_hhdm_ranges, &low_hhdm_count, framebuffer_pages)))
         return 0;
+    *failure_stage = BYTER_PT_STAGE_HHDM;
     for (uint32_t i = 0; i < low_hhdm_count; ++i)
         if (!map_ram_range(&state, low_hhdm_ranges[i], BYTER_AARCH64_HHDM_OFFSET)) return 0;
     for (uint32_t i = 0; i < hhdm_count; ++i)
@@ -288,9 +292,11 @@ int byter_aarch64_build_page_tables(
     if (has_framebuffer && !map_special_range(&state,
         (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W | PF_X,
         BYTER_AARCH64_HHDM_OFFSET)) return 0;
+    *failure_stage = BYTER_PT_STAGE_KERNEL;
     for (uint32_t i = 0; i < segment_count; ++i)
         if (!map_kernel_segment(&state, &segments[i])) return 0;
 
+    *failure_stage = BYTER_PT_STAGE_CLEAN;
     uint64_t tcr = 16ULL | (1ULL << 8) | (1ULL << 10) | (2ULL << 12) |
                    (16ULL << 16) | (1ULL << 24) | (1ULL << 26) |
                    (2ULL << 28) | (2ULL << 30) | ((uint64_t)state.pa_range << 32);

@@ -37,6 +37,12 @@ enum {
     STAGE_USABLE_MAP = 0xfb7185,
     STAGE_MEMMAP = 0x64748b,
     STAGE_TABLES = 0x38bdf8,
+    STAGE_PT_INIT_FAILED = 0xff006e,
+    STAGE_PT_RANGES_FAILED = 0x9d4edd,
+    STAGE_PT_IDENTITY_FAILED = 0x00b4d8,
+    STAGE_PT_HHDM_FAILED = 0x80b918,
+    STAGE_PT_KERNEL_FAILED = 0xf72585,
+    STAGE_PT_CLEAN_FAILED = 0x3a0ca3,
     STAGE_ELF_LOADED = 0xf97316,
     STAGE_BASE_REVISION = 0xa855f7,
     STAGE_ABI_READY = 0xd946ef,
@@ -835,9 +841,18 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     for (u32 i = 0; i < memory_count; ++i)
         page_table_memory[i] = (struct byter_aarch64_range){memory[i].base, memory[i].length};
     struct byter_aarch64_page_tables page_tables;
+    u32 page_table_failure_stage;
     if (!byter_aarch64_build_page_tables(shim, shim_size, page_table_memory, memory_count,
             (struct byter_aarch64_range){framebuffer_range.base, framebuffer_range.length},
-            has_framebuffer, page_table_segments, segment_count, &page_tables)) return 0;
+            has_framebuffer, page_table_segments, segment_count, &page_tables, &page_table_failure_stage)) {
+        static const u32 failure_colors[] = {
+            0, STAGE_PT_INIT_FAILED, STAGE_PT_RANGES_FAILED, STAGE_PT_IDENTITY_FAILED,
+            STAGE_PT_HHDM_FAILED, STAGE_PT_KERNEL_FAILED, STAGE_PT_CLEAN_FAILED
+        };
+        if (page_table_failure_stage < sizeof(failure_colors) / sizeof(failure_colors[0]))
+            show_boot_stage(failure_colors[page_table_failure_stage]);
+        return 0;
+    }
     u64 hhdm_offset = page_tables.hhdm_offset;
     show_boot_stage(STAGE_TABLES);
 

@@ -24,11 +24,20 @@ struct byter_aarch64_page_tables {
     uint64_t hhdm_offset;
 };
 
+enum byter_aarch64_page_tables_stage {
+    BYTER_PT_STAGE_INIT = 1,
+    BYTER_PT_STAGE_RANGES,
+    BYTER_PT_STAGE_IDENTITY,
+    BYTER_PT_STAGE_HHDM,
+    BYTER_PT_STAGE_KERNEL,
+    BYTER_PT_STAGE_CLEAN,
+};
+
 int byter_aarch64_build_page_tables(
     uint8_t *shim, uint64_t shim_size,
     const struct byter_aarch64_range *memory, uint32_t memory_count,
     struct byter_aarch64_range framebuffer, int has_framebuffer,
     const struct byter_aarch64_load_segment *segments, uint32_t segment_count,
-    struct byter_aarch64_page_tables *result);
+    struct byter_aarch64_page_tables *result, uint32_t *failure_stage);
 
 #endif

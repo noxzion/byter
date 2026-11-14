@@ -68,6 +68,12 @@ reached if execution stops:
 | Indigo | ELF image is clear of framebuffer mappings |
 | Rose | Usable memory ranges prepared |
 | Slate | Memory map built |
+| Hot pink | Page table setup or physical address sizing failed |
+| Lavender | Page table ranges failed |
+| Cyan | Identity mappings failed |
+| Lime | HHDM mappings failed |
+| Rose | Kernel mappings failed |
+| Deep indigo | Page table cache clean failed |
 | Sky | Page tables built |
 | Orange | ELF loaded |
 | Purple | Base revision accepted |
