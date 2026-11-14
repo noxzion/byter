@@ -9,20 +9,17 @@ arch/aarch64/page_tables.c таблицы страниц и права PT_LOAD
 arch/aarch64/image.ld      linker script shim
 core/elf_loader.c          проверка и загрузка ELF, ответы Byter ABI
 include/byter.h           публичные структуры и ID Byter ABI
-../example/                 пример ядра
-../tools/                  упаковщик Android boot image
+../tools/                  утилиты, включая упаковщик Android boot image
 ```
 
-Собрать образ можно из корня проекта командой `make`; результат появится в
-`Boot/build/byter-boot.img`. `make boot` дополнительно запускает его через
-Fastboot. Передаётся только временный RAM-образ, разделы не прошиваются.
-`Boot/byter.cfg` задаёт ELF и `cmdline`; другой файл можно выбрать через
-`make boot CONFIG=Boot/dev.cfg`, а `ELF=/путь/ядро.elf` переопределяет конфиг.
-Конфиг читается при сборке; все ELF, названия пунктов и cmdline встраиваются в
-RAM-образ. Старый формат с `kernel=` и `cmdline=` остаётся рабочим и создаёт один
-пункт меню с названием `Byter`.
+Собрать только загрузчик можно из корня проекта командой `make -C Boot shim`;
+результат `Boot/build/boot-shim.bin` используется потребляющим проектом.
+Сборка ядра и Android boot image здесь не выполняется. Для самостоятельной
+сборки и запуска используй [Byter template](https://github.com/noxzion/byter-template),
+который получает ABI, shim и упаковщик из ветки `assets` этого репозитория.
 
-Для нескольких вариантов используй повторяющиеся блоки `entry=`:
+Формат конфигурации Android boot image поддерживает несколько ELF и cmdline
+через повторяющиеся блоки `entry=`:
 
 ```ini
 entry=Byter example
@@ -37,11 +34,8 @@ cmdline=mode=recovery
 Каждый `entry=` начинает новый блок; следующие `kernel=` и `cmdline=` относятся
 к нему. Пути относительны к конфигу. Поддерживается до 16 пунктов, название — до
 63 печатных ASCII-символов. Название показывается в меню; Volume Up/Down
-перемещают выбор, Power запускает выбранный ELF. По таймауту запускается первый.
-`ELF=...` можно использовать только с конфигом из одного пункта.
-
-Пример ядра в `example/main.c` проверяет ответы framebuffer, memory map и
-executable address, затем рисует цветной квадрат.
+перемещают выбор, Power запускает выбранный ELF, Essential Key запрашивает
+возврат в Fastboot, таймаут выбирает первый пункт.
 Framebuffer shim получает из DTB-узла `simple-framebuffer`. Если ABL его не
 передаёт, используется изолированный проверенный профиль A059 в
 `platform/a059/framebuffer.c`. Shim отвечает на bootloader-info, DTB,

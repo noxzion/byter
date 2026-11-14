@@ -14,36 +14,17 @@ Android boot image → ARM64 shim → AArch64 ELF kernel
 
 ## Быстрый старт
 
-Нужны `clang`, `ld.lld`, `llvm-objcopy`, `mkbootimg`, `fastboot` и `python3`.
+Нужны `clang`, `ld.lld` и `llvm-objcopy`, чтобы собрать shim.
 
 ```sh
-make doctor   # проверить инструменты
-make          # собрать Boot/build/byter-boot.img
-make boot     # собрать и запустить в RAM
+make -C Boot shim
 ```
 
-По умолчанию сборка читает `Boot/byter.cfg`: `kernel=` выбирает ELF, а
-`cmdline=` задаёт строку, которую ядро получает через executable-cmdline request.
-Путь `kernel=` считается относительно файла конфига. Можно выбрать другой конфиг
-командой `make boot CONFIG=Boot/dev.cfg`; параметр
-`ELF=/путь/ядро.elf` переопределяет kernel из конфига.
-
-`example/` — демонстрационное ядро загрузчика, а не основная часть Byter. Сейчас
-оно проверяет ответы framebuffer, memory map, executable address и наличие
-переведённого DTB `reg`-ресурса в memory map, выполняет EL1 SVC с возвратом через
-`eret`, затем рисует цветной квадрат.
-Верхний левый голубой маркер означает, что `reg` найден как `RESERVED`, но
-внешнего ресурса выше 4 GiB в DTB не обнаружено. Пурпурный маркер означает, что
-такой ресурс найден и проверен через identity map и HHDM; красный — что проверка
-не прошла. Запустить отдельный
-диагностический RAM-образ можно командой `make diagnostic`. Чтобы изменить
-пример, открой `example/main.c` и выполни `make boot`.
-
-Для своего ELF64 AArch64 `ET_EXEC`:
-
-```sh
-make boot ELF=/путь/к/моему-ядру.elf
-```
+Основной репозиторий содержит загрузчик и его платформенный код. Сборка ядра и
+Android boot image выполняется отдельно в [Byter template](https://github.com/noxzion/byter-template).
+В нём можно собрать ELF или запустить готовый template через `fastboot boot`.
+Исходники прежнего диагностического ядра могут оставаться локально в
+игнорируемом `example/`, но в репозиторий не входят.
 
 ## Структура
 
@@ -51,7 +32,7 @@ make boot ELF=/путь/к/моему-ядру.elf
 - `Boot/core/` — загрузчик ELF и обработка запросов Limine.
 - `Boot/include/byter.h` — Byter-имена для структур и ID Limine-совместимого wire ABI.
 - [`Boot/ABI.md`](Boot/ABI.md) — поддерживаемые запросы, ревизии и ограничения ABI.
-- `tools/` — упаковка Android boot image и инструменты разработки.
+- `tools/` — утилиты загрузчика, используемые template при упаковке образа.
 - [ROADMAP.md](ROADMAP.md) — этапы развития и критерии готовности.
 
 [Минимальный пример ядра на Byter ABI](https://github.com/noxzion/byter-template.git)
