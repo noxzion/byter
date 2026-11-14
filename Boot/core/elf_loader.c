@@ -456,6 +456,10 @@ static int matches_words(u64 address, const u64 *words, u32 count, u64 end) {
     return 1;
 }
 
+static u64 hhdm_pointer(u64 physical, u64 offset) {
+    return physical + offset;
+}
+
 static void find_request_window(range *segments, u32 count, u64 *window_start,
                                 u64 *window_end) {
     const u64 start_marker[4] = BYTER_REQUESTS_START_MARKER;
@@ -500,9 +504,11 @@ static void find_request_window(range *segments, u32 count, u64 *window_start,
 static void resolve_requests(range *segments, u32 count,
                              struct byter_bootloader_info_response *bootloader_info,
                              struct byter_dtb_response *dtb,
+                             struct byter_hhdm_response *hhdm,
                              struct byter_framebuffer_response *framebuffer,
                              struct byter_memmap_response *memmap,
-                             struct byter_executable_address_response *executable_address) {
+                             struct byter_executable_address_response *executable_address,
+                             u64 hhdm_offset) {
     u64 window_start, window_end;
     find_request_window(segments, count, &window_start, &window_end);
     if (window_start >= window_end) return;
@@ -530,15 +536,17 @@ static void resolve_requests(range *segments, u32 count,
             *response = 0;
             if (*revision == 0) {
                 if (has_id(id, (const u64[])BYTER_BOOTLOADER_INFO_REQUEST_ID))
-                    *response = (u64)bootloader_info;
+                    *response = hhdm_pointer((u64)bootloader_info, hhdm_offset);
                 else if (has_id(id, (const u64[])BYTER_DTB_REQUEST_ID))
-                    *response = (u64)dtb;
+                    *response = hhdm_pointer((u64)dtb, hhdm_offset);
+                else if (has_id(id, (const u64[])BYTER_HHDM_REQUEST_ID))
+                    *response = hhdm_pointer((u64)hhdm, hhdm_offset);
                 else if (has_id(id, (const u64[])BYTER_FRAMEBUFFER_REQUEST_ID))
-                    *response = (u64)framebuffer;
+                    *response = hhdm_pointer((u64)framebuffer, hhdm_offset);
                 else if (has_id(id, (const u64[])BYTER_MEMMAP_REQUEST_ID))
-                    *response = (u64)memmap;
+                    *response = hhdm_pointer((u64)memmap, hhdm_offset);
                 else if (has_id(id, (const u64[])BYTER_EXECUTABLE_ADDRESS_REQUEST_ID))
-                    *response = (u64)executable_address;
+                    *response = hhdm_pointer((u64)executable_address, hhdm_offset);
             }
             if (end - address < sizeof(u64)) break;
             address += sizeof(u64);
@@ -649,7 +657,8 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     struct byter_bootloader_info_response *bootloader_info = (void *)handoff;
     struct byter_dtb_response *dtb_response = (void *)(bootloader_info + 1);
     struct byter_framebuffer_response *framebuffer_response = (void *)(dtb_response + 1);
-    struct byter_memmap_response *memmap_response = (void *)(framebuffer_response + 1);
+    struct byter_hhdm_response *hhdm_response = (void *)(framebuffer_response + 1);
+    struct byter_memmap_response *memmap_response = (void *)(hhdm_response + 1);
     struct byter_executable_address_response *executable_address_response = (void *)(memmap_response + 1);
     struct byter_framebuffer *framebuffer = (void *)(executable_address_response + 1);
     struct byter_framebuffer **framebuffers = (void *)(framebuffer + 1);
@@ -661,21 +670,40 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
                           (range){(u64)shim, shim_size}, (range){(u64)dtb, dtb_size},
                           segments, segment_count, framebuffer_range, has_framebuffer,
                           usable, usable_count, memmap_entries, &memmap_count)) return 0;
-    for (u32 i = 0; i < memmap_count; ++i) memmap_entry_pointers[i] = &memmap_entries[i];
+    struct byter_aarch64_range page_table_memory[MAX_RANGES];
+    for (u32 i = 0; i < memory_count; ++i)
+        page_table_memory[i] = (struct byter_aarch64_range){memory[i].base, memory[i].length};
+    struct byter_aarch64_page_tables page_tables;
+    if (!byter_aarch64_build_page_tables(shim, shim_size, page_table_memory, memory_count,
+            (struct byter_aarch64_range){framebuffer_range.base, framebuffer_range.length},
+            has_framebuffer, page_table_segments, segment_count, &page_tables)) return 0;
+    u64 hhdm_offset = page_tables.hhdm_offset;
+
+    for (u32 i = 0; i < memmap_count; ++i)
+        memmap_entry_pointers[i] = (struct byter_memmap_entry *)(u64)
+            hhdm_pointer((u64)&memmap_entries[i], hhdm_offset);
     *memmap_response = (struct byter_memmap_response){
-        .revision = 0, .entry_count = memmap_count, .entries = memmap_entry_pointers
+        .revision = 0, .entry_count = memmap_count,
+        .entries = (struct byter_memmap_entry **)(u64)
+            hhdm_pointer((u64)memmap_entry_pointers, hhdm_offset)
     };
     *executable_address_response = (struct byter_executable_address_response){
         .revision = 0, .physical_base = low, .virtual_base = virtual_low
     };
     *bootloader_info = (struct byter_bootloader_info_response){
-        .revision = 0, .name = (char *)byter_name, .version = (char *)byter_version
+        .revision = 0,
+        .name = (char *)(u64)hhdm_pointer((u64)byter_name, hhdm_offset),
+        .version = (char *)(u64)hhdm_pointer((u64)byter_version, hhdm_offset)
     };
-    *dtb_response = (struct byter_dtb_response){.revision = 0, .dtb_ptr = dtb};
+    *dtb_response = (struct byter_dtb_response){
+        .revision = 0,
+        .dtb_ptr = (void *)(u64)hhdm_pointer((u64)dtb, hhdm_offset)
+    };
+    *hhdm_response = (struct byter_hhdm_response){.revision = 0, .offset = hhdm_offset};
     struct byter_framebuffer_response *framebuffer_result = 0;
     if (has_framebuffer) {
         *framebuffer = (struct byter_framebuffer){
-            .address = (void *)(u64)framebuffer_data.address,
+            .address = (void *)(u64)hhdm_pointer(framebuffer_data.address, hhdm_offset),
             .width = framebuffer_data.width, .height = framebuffer_data.height,
             .pitch = framebuffer_data.pitch, .bpp = 32,
             .memory_model = BYTER_FRAMEBUFFER_RGB,
@@ -686,9 +714,12 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
             .blue_mask_size = framebuffer_data.blue_size,
             .blue_mask_shift = framebuffer_data.blue_shift,
         };
-        framebuffers[0] = framebuffer;
+        framebuffers[0] = (struct byter_framebuffer *)(u64)
+            hhdm_pointer((u64)framebuffer, hhdm_offset);
         *framebuffer_response = (struct byter_framebuffer_response){
-            .revision = 0, .framebuffer_count = 1, .framebuffers = framebuffers
+            .revision = 0, .framebuffer_count = 1,
+            .framebuffers = (struct byter_framebuffer **)(u64)
+                hhdm_pointer((u64)framebuffers, hhdm_offset)
         };
         framebuffer_result = framebuffer_response;
     }
@@ -702,14 +733,8 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     }
 
     resolve_requests(segments, segment_count, bootloader_info, dtb_response,
-                     framebuffer_result, memmap_response, executable_address_response);
-    struct byter_aarch64_range page_table_memory[MAX_RANGES];
-    for (u32 i = 0; i < memory_count; ++i)
-        page_table_memory[i] = (struct byter_aarch64_range){memory[i].base, memory[i].length};
-    struct byter_aarch64_page_tables page_tables;
-    if (!byter_aarch64_build_page_tables(shim, shim_size, page_table_memory, memory_count,
-            (struct byter_aarch64_range){framebuffer_range.base, framebuffer_range.length},
-            has_framebuffer, page_table_segments, segment_count, &page_tables)) return 0;
+                     hhdm_response, framebuffer_result, memmap_response,
+                     executable_address_response, hhdm_offset);
     boot_context *context = (boot_context *)(handoff + HANDOFF_SIZE - sizeof(*context));
     *context = (boot_context){eh->entry, page_tables.ttbr0, page_tables.ttbr1, page_tables.tcr};
     return (u64)context;

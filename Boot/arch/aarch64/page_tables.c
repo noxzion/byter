@@ -130,25 +130,32 @@ static int map_page(page_table_state *state, uint64_t virtual_address,
     return 1;
 }
 
-static int map_ram_range(page_table_state *state, range region) {
+static int map_ram_range(page_table_state *state, range region, uint64_t virtual_offset) {
     range aligned;
     if (!align_range(region, &aligned) || aligned.base > state->max_physical_address ||
-        aligned.length > state->max_physical_address - aligned.base) return 0;
+        aligned.length > state->max_physical_address - aligned.base ||
+        virtual_offset > ~0ULL - aligned.base ||
+        (virtual_offset && virtual_offset + aligned.base < 0xffff000000000000ULL) ||
+        (!virtual_offset && (aligned.base >= 0x800000000000ULL ||
+         aligned.length > 0x800000000000ULL - aligned.base)) ||
+        aligned.length - 1 > ~0ULL - (virtual_offset + aligned.base)) return 0;
     uint64_t address = aligned.base;
     uint64_t end = address + aligned.length;
     uint64_t attributes = page_attributes(ATTR_NORMAL_WB, PF_W);
     while (address < end) {
         uint64_t remaining = end - address;
-        if (!(address & (BLOCK_SIZE - 1)) && remaining >= BLOCK_SIZE) {
-            uint64_t *l2 = level2_table(state, address);
+        uint64_t virtual_address = virtual_offset + address;
+        if (!(address & (BLOCK_SIZE - 1)) && !(virtual_address & (BLOCK_SIZE - 1)) &&
+            remaining >= BLOCK_SIZE) {
+            uint64_t *l2 = level2_table(state, virtual_address);
             if (!l2) return 0;
-            uint32_t index = (uint32_t)((address >> 21) & 0x1ff);
+            uint32_t index = (uint32_t)((virtual_address >> 21) & 0x1ff);
             uint64_t descriptor = address | attributes | DESC_BLOCK;
             if (l2[index] && l2[index] != descriptor) return 0;
             l2[index] = descriptor;
             address += BLOCK_SIZE;
         } else {
-            if (!map_page(state, address, address, attributes)) return 0;
+            if (!map_page(state, virtual_address, address, attributes)) return 0;
             address += PAGE_SIZE;
         }
     }
@@ -156,13 +163,19 @@ static int map_ram_range(page_table_state *state, range region) {
 }
 
 static int map_special_range(page_table_state *state, range region, uint64_t attr_index,
-                             uint32_t flags) {
+                             uint32_t flags, uint64_t virtual_offset) {
     range aligned;
     if (!align_range(region, &aligned) || aligned.base > state->max_physical_address ||
         aligned.length > state->max_physical_address - aligned.base) return 0;
     uint64_t attributes = page_attributes(attr_index, flags);
+    if (virtual_offset > ~0ULL - aligned.base ||
+        (virtual_offset && virtual_offset + aligned.base < 0xffff000000000000ULL) ||
+        (!virtual_offset && (aligned.base >= 0x800000000000ULL ||
+         aligned.length > 0x800000000000ULL - aligned.base)) ||
+        aligned.length - 1 > ~0ULL - (virtual_offset + aligned.base)) return 0;
     for (uint64_t offset = 0; offset < aligned.length; offset += PAGE_SIZE)
-        if (!map_page(state, aligned.base + offset, aligned.base + offset, attributes)) return 0;
+        if (!map_page(state, virtual_offset + aligned.base + offset,
+                      aligned.base + offset, attributes)) return 0;
     return 1;
 }
 
@@ -240,11 +253,26 @@ int byter_aarch64_build_page_tables(
         return 0;
 
     for (uint32_t i = 0; i < identity_count; ++i)
-        if (!map_ram_range(&state, identity_ranges[i])) return 0;
+        if (!map_ram_range(&state, identity_ranges[i], 0)) return 0;
     if (!map_special_range(&state, (range){(uint64_t)shim, shim_size}, ATTR_NORMAL_WB,
-                           PF_W | PF_X)) return 0;
+                           PF_W | PF_X, 0)) return 0;
     if (has_framebuffer && !map_special_range(&state,
-        (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W)) return 0;
+        (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W, 0)) return 0;
+
+    range hhdm_ranges[MAX_MAP_RANGES];
+    uint32_t hhdm_count = 0;
+    for (uint32_t i = 0; i < memory_count; ++i) {
+        range aligned;
+        if (!align_range((range){memory[i].base, memory[i].length}, &aligned) ||
+            hhdm_count == MAX_MAP_RANGES) return 0;
+        hhdm_ranges[hhdm_count++] = aligned;
+    }
+    if (has_framebuffer && !subtract_range(hhdm_ranges, &hhdm_count, framebuffer_pages)) return 0;
+    for (uint32_t i = 0; i < hhdm_count; ++i)
+        if (!map_ram_range(&state, hhdm_ranges[i], BYTER_AARCH64_HHDM_OFFSET)) return 0;
+    if (has_framebuffer && !map_special_range(&state,
+        (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W,
+        BYTER_AARCH64_HHDM_OFFSET)) return 0;
     for (uint32_t i = 0; i < segment_count; ++i)
         if (!map_kernel_segment(&state, &segments[i])) return 0;
 
@@ -259,6 +287,7 @@ int byter_aarch64_build_page_tables(
         .ttbr0 = (uint64_t)state.ttbr0,
         .ttbr1 = (uint64_t)state.ttbr1,
         .tcr = tcr,
+        .hhdm_offset = BYTER_AARCH64_HHDM_OFFSET,
     };
     (void)pa_bits;
     return 1;

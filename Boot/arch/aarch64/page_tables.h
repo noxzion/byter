@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#define BYTER_AARCH64_HHDM_OFFSET 0xffff800000000000ULL
+
 struct byter_aarch64_range {
     uint64_t base;
     uint64_t length;
@@ -19,6 +21,7 @@ struct byter_aarch64_page_tables {
     uint64_t ttbr0;
     uint64_t ttbr1;
     uint64_t tcr;
+    uint64_t hhdm_offset;
 };
 
 int byter_aarch64_build_page_tables(

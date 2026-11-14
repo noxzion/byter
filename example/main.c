@@ -17,6 +17,11 @@ static volatile struct byter_memmap_request memmap_request BYTER_REQUEST = {
     .revision = 0,
 };
 
+static volatile struct byter_hhdm_request hhdm_request BYTER_REQUEST = {
+    .id = BYTER_HHDM_REQUEST_ID,
+    .revision = 0,
+};
+
 static volatile struct byter_executable_address_request executable_address_request BYTER_REQUEST = {
     .id = BYTER_EXECUTABLE_ADDRESS_REQUEST_ID,
     .revision = 0,
@@ -63,6 +68,33 @@ static int valid_executable_address(const struct byter_executable_address_respon
     return 0;
 }
 
+static int valid_hhdm(const struct byter_hhdm_response *hhdm) {
+    return hhdm && hhdm->revision == 0 &&
+           hhdm->offset >= 0xffff000000000000ULL &&
+           !(hhdm->offset & 0x1fffff);
+}
+
+static int framebuffer_is_hhdm(const struct byter_framebuffer *fb,
+                               const struct byter_hhdm_response *hhdm,
+                               const struct byter_memmap_response *map) {
+    if (!fb || !fb->address || !valid_hhdm(hhdm) ||
+        (uint64_t)fb->address < hhdm->offset || !map || !map->entries ||
+        !fb->pitch || !fb->height || fb->height > UINT64_MAX / fb->pitch)
+        return 0;
+
+    uint64_t physical = (uint64_t)fb->address - hhdm->offset;
+    uint64_t size = fb->pitch * fb->height;
+    if (physical > UINT64_MAX - size) return 0;
+    for (uint64_t i = 0; i < map->entry_count; ++i) {
+        const struct byter_memmap_entry *entry = map->entries[i];
+        if (entry->type == BYTER_MEMMAP_FRAMEBUFFER && physical >= entry->base &&
+            physical - entry->base <= entry->length &&
+            size <= entry->length - (physical - entry->base))
+            return 1;
+    }
+    return 0;
+}
+
 static uint32_t rgb(const struct byter_framebuffer *fb, uint8_t red, uint8_t green, uint8_t blue) {
     return ((uint32_t)red << fb->red_mask_shift) |
            ((uint32_t)green << fb->green_mask_shift) |
@@ -71,8 +103,10 @@ static uint32_t rgb(const struct byter_framebuffer *fb, uint8_t red, uint8_t gre
 
 void _start(void) {
     struct byter_memmap_response *memmap = memmap_request.response;
+    struct byter_hhdm_response *hhdm = hhdm_request.response;
     if (!valid_memory_map(memmap) ||
-        !valid_executable_address(executable_address_request.response, memmap))
+        !valid_executable_address(executable_address_request.response, memmap) ||
+        !valid_hhdm(hhdm))
         wait_forever();
 
     struct byter_framebuffer_response *response = framebuffer_request.response;
@@ -80,7 +114,8 @@ void _start(void) {
         !response->framebuffers[0]) wait_forever();
 
     struct byter_framebuffer *fb = response->framebuffers[0];
-    if (!fb->address || fb->memory_model != BYTER_FRAMEBUFFER_RGB || fb->bpp != 32 ||
+    if (!fb->address || !framebuffer_is_hhdm(fb, hhdm, memmap) ||
+        fb->memory_model != BYTER_FRAMEBUFFER_RGB || fb->bpp != 32 ||
         !fb->width || !fb->height || fb->width > 16384 || fb->height > 16384 ||
         fb->pitch < fb->width * 4 || fb->pitch % 4 ||
         fb->red_mask_size != 8 || fb->green_mask_size != 8 || fb->blue_mask_size != 8 ||

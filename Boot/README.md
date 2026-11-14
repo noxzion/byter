@@ -25,5 +25,6 @@ Framebuffer shim получает из DTB-узла `simple-framebuffer`. Есл
 framebuffer и memory-map запросы. Карта памяти строится по RAM и known
 reservations из DTB, с отдельными типами для областей загрузчика, ELF-ядра и
 framebuffer. Shim включает MMU и передаёт ядру identity map для RAM и boot data,
-а сегменты ядра отображает по ELF VMA с правами `PT_LOAD`. HHDM и полный Limine
-memory map пока не реализованы.
+а сегменты ядра отображает по ELF VMA с правами `PT_LOAD`. HHDM отображает RAM
+из DTB и framebuffer; это ещё не полная Limine memory map или base-revision
+совместимость.

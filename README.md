@@ -45,6 +45,7 @@ make boot ELF=/путь/к/моему-ядру.elf
 
 Shim включает 4 KiB page tables перед входом в ядро: RAM и boot data остаются
 доступны по identity map, а ELF-сегменты отображаются по своим виртуальным
-адресам с правами из `PT_LOAD`. Shim отвечает на запросы framebuffer, DTB,
-bootloader info, memory map и executable address. HHDM и полное соответствие
-Limine ABI пока не реализованы.
+адресам с правами из `PT_LOAD`. Shim отвечает на HHDM-запрос и возвращает
+указатели ABI через HHDM. Сам HHDM покрывает RAM из DTB и framebuffer. Полная
+карта физических областей и совместимость с base revision Limine пока не
+реализованы.
