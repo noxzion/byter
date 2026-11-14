@@ -2,6 +2,7 @@
 #include "../platform/a059/framebuffer.h"
 #include "../arch/aarch64/page_tables.h"
 #include "console.h"
+#include "boot_menu.h"
 
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -945,6 +946,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
     status_framebuffer = framebuffer_data;
     sync_status_console();
     log_boot_stage("Device tree and framebuffer ready");
+    byter_boot_menu_wait();
     if ((u64)elf < (u64)shim || (u64)elf - (u64)shim > file_size ||
         elf_size > file_size - ((u64)elf - (u64)shim)) return 0;
 
