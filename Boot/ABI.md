@@ -62,6 +62,10 @@ reached if execution stops:
 | Blue | Shim started |
 | Cyan | DTB and framebuffer accepted |
 | Yellow | ELF validated |
+| Lime | ELF physical segments are contiguous |
+| Mint | ELF image is in RAM and clear of shim/DTB |
+| Aqua | ELF image is clear of firmware reservations |
+| Indigo | ELF image is clear of framebuffer mappings |
 | Orange | ELF loaded |
 | Purple | Base revision accepted |
 | Magenta | ABI responses prepared |

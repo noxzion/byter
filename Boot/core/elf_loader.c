@@ -30,6 +30,10 @@ enum {
     STAGE_SHIM = 0x2563eb,
     STAGE_DTB = 0x06b6d4,
     STAGE_ELF_VALID = 0xeab308,
+    STAGE_IMAGE_CONTIGUOUS = 0x84cc16,
+    STAGE_IMAGE_IN_RAM = 0x10b981,
+    STAGE_IMAGE_RESERVED = 0x06b6d4,
+    STAGE_IMAGE_FRAMEBUFFER = 0x6366f1,
     STAGE_ELF_LOADED = 0xf97316,
     STAGE_BASE_REVISION = 0xa855f7,
     STAGE_ABI_READY = 0xd946ef,
@@ -763,12 +767,15 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
         image_size += physical_page_ranges[i].length;
     }
     if (image_high <= image_low || image_size != image_high - image_low) return 0;
+    show_boot_stage(STAGE_IMAGE_CONTIGUOUS);
     range executable_image = {image_low, image_size};
-    if (!in_memory(memory, memory_count, executable_image) ||
-        overlaps(executable_image, (range){(u64)shim, shim_size}) ||
+    if (!in_memory(memory, memory_count, executable_image)) return 0;
+    if (overlaps(executable_image, (range){(u64)shim, shim_size}) ||
         overlaps(executable_image, (range){(u64)dtb, dtb_size})) return 0;
+    show_boot_stage(STAGE_IMAGE_IN_RAM);
     for (u32 i = 0; i < reserved_count; ++i)
         if (overlaps(executable_image, reserved_pages[i])) return 0;
+    show_boot_stage(STAGE_IMAGE_RESERVED);
 
     range framebuffer_range = {framebuffer_data.address, framebuffer_data.size};
     int has_framebuffer = framebuffer_data.format_valid && framebuffer_range.length &&
@@ -784,6 +791,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
     if (has_framebuffer && !page_aligned_range(framebuffer_range, &framebuffer_pages)) return 0;
     if (has_framebuffer && (overlaps(framebuffer_pages, shim_pages) ||
         overlaps(framebuffer_pages, dtb_pages) || overlaps(framebuffer_pages, executable_image))) return 0;
+    show_boot_stage(STAGE_IMAGE_FRAMEBUFFER);
 
     range usable[MAX_OUT_RANGES]; u32 usable_count = 0;
     for (u32 i = 0; i < memory_count; ++i) {
