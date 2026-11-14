@@ -61,41 +61,10 @@ by the selected base-revision-0 subset. This implementation does not claim full
 Limine base-revision-0 compatibility; the tag currently negotiates the Byter
 handoff contract described here.
 
-The center status square records boot progress and remains at the last stage
-reached if execution stops:
-
-| Color | Stage |
-| --- | --- |
-| Blue | Shim started |
-| Cyan | DTB and framebuffer accepted |
-| Yellow | ELF validated |
-| Lime | ELF physical segments are contiguous |
-| Mint | ELF image is in RAM and clear of shim/DTB |
-| Aqua | ELF image is clear of firmware reservations |
-| Indigo | ELF image is clear of framebuffer mappings |
-| Rose | Usable memory ranges prepared |
-| Slate | Memory map built |
-| Hot pink | Page table setup or physical address sizing failed |
-| Lavender | Page table ranges failed |
-| Cyan | Low identity mapping failed |
-| Bright cyan | Other RAM identity mapping failed |
-| Blue | Shim identity mapping failed |
-| Pale cyan | Framebuffer identity mapping failed |
-| Yellow | Low HHDM mappings failed |
-| Blue | Other RAM HHDM mappings failed |
-| Red | Framebuffer HHDM mapping failed |
-| Rose | Kernel mappings failed |
-| Deep indigo | Page table cache clean failed |
-| Sky | Page tables built |
-| Orange | ELF loaded |
-| Purple | Base revision accepted |
-| Magenta | ABI responses prepared |
-| Red | EL2 accepted; dropping to EL1 (only when entered at EL2) |
-| White | EL1 handoff reached |
-| Violet | Kernel entered and base revision checked |
-| Pink | Memory map checked |
-| Amber | Executable address checked |
-| Green | Framebuffer checked; demo running |
+The shim clears the framebuffer at startup and prints boot progress using its
+built-in 8x8 bitmap font. It reports major loading stages and the specific stage
+of page-table setup failures; the last printed line remains visible if execution
+stops. The font is public domain.
 
 ## Declared but not implemented
 

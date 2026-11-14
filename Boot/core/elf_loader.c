@@ -1,6 +1,7 @@
 #include "byter.h"
 #include "../platform/a059/framebuffer.h"
 #include "../arch/aarch64/page_tables.h"
+#include "console.h"
 
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -42,34 +43,27 @@ typedef struct {
 
 static framebuffer_info status_framebuffer;
 
-enum {
-    STAGE_SHIM = 0x2563eb,
-    STAGE_DTB = 0x06b6d4,
-    STAGE_ELF_VALID = 0xeab308,
-    STAGE_IMAGE_CONTIGUOUS = 0x84cc16,
-    STAGE_IMAGE_IN_RAM = 0x10b981,
-    STAGE_IMAGE_RESERVED = 0x06b6d4,
-    STAGE_IMAGE_FRAMEBUFFER = 0x6366f1,
-    STAGE_USABLE_MAP = 0xfb7185,
-    STAGE_MEMMAP = 0x64748b,
-    STAGE_TABLES = 0x38bdf8,
-    STAGE_PT_INIT_FAILED = 0xff006e,
-    STAGE_PT_RANGES_FAILED = 0x9d4edd,
-    STAGE_PT_IDENTITY_LOW_FAILED = 0x00b4d8,
-    STAGE_PT_IDENTITY_RAM_FAILED = 0x00e5ff,
-    STAGE_PT_IDENTITY_SHIM_FAILED = 0x4361ee,
-    STAGE_PT_IDENTITY_FB_FAILED = 0x90e0ef,
-    STAGE_PT_HHDM_LOW_FAILED = 0xffff00,
-    STAGE_PT_HHDM_RAM_FAILED = 0x0000ff,
-    STAGE_PT_HHDM_FB_FAILED = 0xff0000,
-    STAGE_PT_KERNEL_FAILED = 0xf72585,
-    STAGE_PT_CLEAN_FAILED = 0x3a0ca3,
-    STAGE_ELF_LOADED = 0xf97316,
-    STAGE_BASE_REVISION = 0xa855f7,
-    STAGE_ABI_READY = 0xd946ef,
-    STAGE_EL2_DROP = 0xdc2626,
-    STAGE_HANDOFF = 0xffffff,
-};
+static int console_ready;
+
+static void sync_status_console(void) {
+    if (!status_framebuffer.format_valid || !status_framebuffer.address) return;
+    struct byter_framebuffer fb = {
+        .address = (void *)(u64)status_framebuffer.address,
+        .width = status_framebuffer.width,
+        .height = status_framebuffer.height,
+        .pitch = status_framebuffer.pitch,
+        .bpp = 32,
+        .memory_model = BYTER_FRAMEBUFFER_RGB,
+        .red_mask_size = status_framebuffer.red_size,
+        .red_mask_shift = status_framebuffer.red_shift,
+        .green_mask_size = status_framebuffer.green_size,
+        .green_mask_shift = status_framebuffer.green_shift,
+        .blue_mask_size = status_framebuffer.blue_size,
+        .blue_mask_shift = status_framebuffer.blue_shift,
+    };
+    byter_console_set_framebuffer(&fb);
+    console_ready = 1;
+}
 
 static void set_status_framebuffer(const struct byter_framebuffer *fb) {
     if (!fb) return;
@@ -87,36 +81,21 @@ static void set_status_framebuffer(const struct byter_framebuffer *fb) {
         .blue_shift = fb->blue_mask_shift,
         .format_valid = fb->memory_model == BYTER_FRAMEBUFFER_RGB && fb->bpp == 32,
     };
+    sync_status_console();
 }
 
-static void show_boot_stage(u32 color) {
-    framebuffer_info *fb = &status_framebuffer;
-    if (!fb->format_valid || !fb->address || fb->width < 32 || fb->height < 32 ||
-        fb->width > 16384 || fb->height > 16384 || fb->pitch < fb->width * 4 ||
-        fb->pitch % 4 || fb->height > ~0ULL / fb->pitch ||
-        fb->size < fb->pitch * fb->height) return;
-
-    u32 pixel = (((color >> 16) & 0xff) << fb->red_shift) |
-                (((color >> 8) & 0xff) << fb->green_shift) |
-                ((color & 0xff) << fb->blue_shift);
-    u32 side = fb->width < fb->height ? (u32)fb->width : (u32)fb->height;
-    if (side > 160) side = 160;
-    u32 left = ((u32)fb->width - side) / 2;
-    u32 top = ((u32)fb->height - side) / 2;
-    volatile u32 *pixels = (volatile u32 *)(u64)fb->address;
-    u32 stride = (u32)(fb->pitch / 4);
-    for (u32 y = 0; y < side; ++y)
-        for (u32 x = 0; x < side; ++x)
-            pixels[(top + y) * stride + left + x] = pixel;
-    __asm__ volatile("dsb sy" ::: "memory");
+static void log_boot_stage(const char *message) {
+    if (!console_ready || !message) return;
+    byter_console_write(message);
+    byter_console_write("\n");
 }
 
 void byter_shim_handoff_stage(void) {
-    show_boot_stage(STAGE_HANDOFF);
+    log_boot_stage("Entering kernel");
 }
 
 void byter_shim_el2_drop_stage(void) {
-    show_boot_stage(STAGE_EL2_DROP);
+    log_boot_stage("Dropping from EL2 to EL1");
 }
 
 typedef struct { u32 type, flags; u64 offset, vaddr, paddr, filesz, memsz, align; } elf_program;
@@ -932,7 +911,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
     struct byter_framebuffer early_framebuffer;
     if (byter_a059_framebuffer_fallback(&early_framebuffer))
         set_status_framebuffer(&early_framebuffer);
-    show_boot_stage(STAGE_SHIM);
+    log_boot_stage("Starting AArch64 shim");
     int fdt_valid = parse_fdt(dtb, &dtb_size, memory, &memory_count, reserved,
                               &reserved_count, &framebuffer_data,
                               &root_address_cells, &root_size_cells);
@@ -964,7 +943,8 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
         }
     }
     status_framebuffer = framebuffer_data;
-    show_boot_stage(STAGE_DTB);
+    sync_status_console();
+    log_boot_stage("Device tree and framebuffer ready");
     if ((u64)elf < (u64)shim || (u64)elf - (u64)shim > file_size ||
         elf_size > file_size - ((u64)elf - (u64)shim)) return 0;
 
@@ -1018,7 +998,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
         if ((p->flags & 1) && eh->entry >= vr.base && eh->entry - vr.base < vr.length) entry_ok = 1;
     }
     if (!segment_count || !entry_ok || high <= low) return 0;
-    show_boot_stage(STAGE_ELF_VALID);
+    log_boot_stage("Kernel ELF validated");
 
     u64 image_low = ~0ULL, image_high = 0, image_size = 0;
     for (u32 i = 0; i < segment_count; ++i) {
@@ -1029,15 +1009,15 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
         image_size += physical_page_ranges[i].length;
     }
     if (image_high <= image_low || image_size != image_high - image_low) return 0;
-    show_boot_stage(STAGE_IMAGE_CONTIGUOUS);
+    log_boot_stage("Kernel segments are contiguous");
     range executable_image = {image_low, image_size};
     if (!in_memory(memory, memory_count, executable_image)) return 0;
     if (overlaps(executable_image, (range){(u64)shim, shim_size}) ||
         overlaps(executable_image, (range){(u64)dtb, dtb_size})) return 0;
-    show_boot_stage(STAGE_IMAGE_IN_RAM);
+    log_boot_stage("Kernel image is in RAM");
     for (u32 i = 0; i < reserved_count; ++i)
         if (overlaps(executable_image, reserved_pages[i])) return 0;
-    show_boot_stage(STAGE_IMAGE_RESERVED);
+    log_boot_stage("Kernel avoids reserved memory");
 
     range framebuffer_range = {framebuffer_data.address, framebuffer_data.size};
     int has_framebuffer = framebuffer_data.format_valid && framebuffer_range.length &&
@@ -1053,7 +1033,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
     if (has_framebuffer && !page_aligned_range(framebuffer_range, &framebuffer_pages)) return 0;
     if (has_framebuffer && (overlaps(framebuffer_pages, shim_pages) ||
         overlaps(framebuffer_pages, dtb_pages) || overlaps(framebuffer_pages, executable_image))) return 0;
-    show_boot_stage(STAGE_IMAGE_FRAMEBUFFER);
+    log_boot_stage("Kernel avoids framebuffer memory");
 
     range usable[MAX_OUT_RANGES]; u32 usable_count = 0;
     for (u32 i = 0; i < memory_count; ++i) {
@@ -1070,7 +1050,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
     if (!subtract_range(usable, &usable_count, executable_image) ||
         !subtract_range(usable, &usable_count, (range){0, 0x1000})) return 0;
     if (has_framebuffer && !subtract_range(usable, &usable_count, framebuffer_pages)) return 0;
-    show_boot_stage(STAGE_USABLE_MAP);
+    log_boot_stage("Usable memory ranges prepared");
 
     if (shim_size < HANDOFF_OFFSET + HANDOFF_SIZE + STACK_SIZE + 0x10000) return 0;
     u8 *handoff = shim + shim_size - HANDOFF_OFFSET;
@@ -1091,7 +1071,7 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
                           shim_pages, dtb_pages,
                           segments, segment_count, executable_image, framebuffer_pages, has_framebuffer,
                           usable, usable_count, memmap_entries, &memmap_count)) return 0;
-    show_boot_stage(STAGE_MEMMAP);
+    log_boot_stage("Memory map built");
     struct byter_aarch64_range page_table_memory[MAX_RANGES];
     struct byter_aarch64_range page_table_reserved[MAX_RANGES];
     for (u32 i = 0; i < memory_count; ++i)
@@ -1106,19 +1086,22 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
             page_table_reserved, reserved_count,
             (struct byter_aarch64_range){framebuffer_range.base, framebuffer_range.length},
             has_framebuffer, page_table_segments, segment_count, &page_tables, &page_table_failure_stage)) {
-        static const u32 failure_colors[] = {
-            0, STAGE_PT_INIT_FAILED, STAGE_PT_RANGES_FAILED,
-            STAGE_PT_IDENTITY_LOW_FAILED, STAGE_PT_IDENTITY_RAM_FAILED,
-            STAGE_PT_IDENTITY_SHIM_FAILED, STAGE_PT_IDENTITY_FB_FAILED,
-            STAGE_PT_HHDM_LOW_FAILED, STAGE_PT_HHDM_RAM_FAILED,
-            STAGE_PT_HHDM_FB_FAILED, STAGE_PT_KERNEL_FAILED, STAGE_PT_CLEAN_FAILED
+        static const char *const failure_messages[] = {
+            "", "ERROR: page table initialization failed", "ERROR: invalid mapping ranges",
+            "ERROR: low identity map failed", "ERROR: RAM identity map failed",
+            "ERROR: shim identity map failed", "ERROR: framebuffer identity map failed",
+            "ERROR: low HHDM map failed", "ERROR: RAM HHDM map failed",
+            "ERROR: framebuffer HHDM map failed", "ERROR: kernel map failed",
+            "ERROR: page table cache clean failed"
         };
-        if (page_table_failure_stage < sizeof(failure_colors) / sizeof(failure_colors[0]))
-            show_boot_stage(failure_colors[page_table_failure_stage]);
+        if (page_table_failure_stage < sizeof(failure_messages) / sizeof(failure_messages[0]))
+            log_boot_stage(failure_messages[page_table_failure_stage]);
+        else
+            log_boot_stage("ERROR: page table setup failed");
         return 0;
     }
     u64 hhdm_offset = page_tables.hhdm_offset;
-    show_boot_stage(STAGE_TABLES);
+    log_boot_stage("Page tables ready");
 
     for (u32 i = 0; i < memmap_count; ++i)
         memmap_entry_pointers[i] = (struct byter_memmap_entry *)(u64)
@@ -1174,15 +1157,18 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size,
         zero_bytes(dst + p->filesz, p->memsz - p->filesz);
         flush_loaded_segment((range){p->paddr, p->memsz}, !!(p->flags & 1));
     }
-    show_boot_stage(STAGE_ELF_LOADED);
+    log_boot_stage("Kernel ELF loaded");
 
-    if (!resolve_base_revision(segments, segment_count)) return 0;
-    show_boot_stage(STAGE_BASE_REVISION);
+    if (!resolve_base_revision(segments, segment_count)) {
+        log_boot_stage("ERROR: unsupported base revision request");
+        return 0;
+    }
+    log_boot_stage("Byter base revision accepted");
 
     resolve_requests(segments, segment_count, bootloader_info, cmdline_response, dtb_response,
                      hhdm_response, framebuffer_result, memmap_response,
                      executable_address_response, hhdm_offset);
-    show_boot_stage(STAGE_ABI_READY);
+    log_boot_stage("Boot protocol responses ready");
     boot_context *context = (boot_context *)(handoff + HANDOFF_SIZE - sizeof(*context));
     *context = (boot_context){eh->entry, page_tables.ttbr0, page_tables.ttbr1, page_tables.tcr};
     return (u64)context;
