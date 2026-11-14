@@ -186,8 +186,10 @@ void _start(void) {
     show_stage(fb, 0x06, 0xb6, 0xd4); /* Framebuffer HHDM mapping accepted. */
 
     struct byter_dtb_response *dtb = dtb_request.response;
-    if (!dtb || dtb->revision != 0 ||
-        !byter_example_fdt_device_map_check(dtb->dtb_ptr, memmap)) {
+    int device_map_status = dtb && dtb->revision == 0
+        ? byter_example_fdt_device_map_check(dtb->dtb_ptr, memmap)
+        : BYTER_EXAMPLE_FDT_MAP_INVALID;
+    if (device_map_status == BYTER_EXAMPLE_FDT_MAP_INVALID) {
         show_diagnostic_marker(fb, 0xff, 0x00, 0x00); /* DTB device map check failed. */
         wait_forever();
     }
@@ -216,7 +218,10 @@ void _start(void) {
         for (uint32_t x = 0; x < side; ++x)
             pixels[(top + y) * stride + left + x] = square_color;
 
-    show_diagnostic_marker(fb, 0x00, 0xff, 0xff); /* A DTB device reg is RESERVED in the map. */
+    if (device_map_status == BYTER_EXAMPLE_FDT_MAP_HIGH_EXTERNAL_MAPPED)
+        show_diagnostic_marker(fb, 0xff, 0x00, 0xff); /* >4 GiB identity/HHDM translations passed. */
+    else
+        show_diagnostic_marker(fb, 0x00, 0xff, 0xff); /* No external >4 GiB device reg in DTB. */
     __asm__ volatile("dsb sy" ::: "memory");
     wait_forever();
 }

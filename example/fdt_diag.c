@@ -8,8 +8,12 @@ typedef struct {
     uint32_t address_cells, size_cells;
     const uint8_t *ranges;
     uint32_t ranges_size;
-    uint8_t has_ranges, excluded;
+    uint8_t has_ranges, excluded, is_memory;
 } fdt_context;
+
+#define MAX_DTB_MEMORY_RANGES 32
+#define MAX_DTB_DEVICE_RANGES 512
+#define FOUR_GIB 0x100000000ULL
 
 static uint32_t read_be32(const uint8_t *p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
@@ -92,6 +96,31 @@ static int map_reserves(const struct byter_memmap_response *map, checked_range r
     return 0;
 }
 
+static int overlaps_range(checked_range first, checked_range second) {
+    if (!first.length || !second.length || first.base > UINT64_MAX - first.length ||
+        second.base > UINT64_MAX - second.length) return 1;
+    return first.base < second.base + second.length && second.base < first.base + first.length;
+}
+
+static int address_is_mapped(uint64_t address) {
+    uint64_t par;
+    __asm__ volatile("at s1e1r, %0\n\tisb\n\tmrs %1, par_el1"
+                     : "+r"(address), "=r"(par) :: "memory");
+    return !(par & 1);
+}
+
+static int range_is_mapped(checked_range range, uint64_t offset) {
+    if (!range.length || range.base > UINT64_MAX - (range.length - 1) ||
+        offset > UINT64_MAX - range.base) return 0;
+    uint64_t last = range.base + range.length - 1;
+    if (offset > UINT64_MAX - last) return 0;
+    uint64_t first_va = offset + range.base;
+    uint64_t middle_va = offset + range.base + (range.length - 1) / 2;
+    uint64_t last_va = offset + last;
+    return address_is_mapped(first_va) && address_is_mapped(middle_va) &&
+           address_is_mapped(last_va);
+}
+
 int byter_example_fdt_device_map_check(const void *blob,
                                       const struct byter_memmap_response *map) {
     if (!blob || !map || !map->entries || !map->entry_count || map->entry_count > 512)
@@ -108,6 +137,12 @@ int byter_example_fdt_device_map_check(const void *blob,
     const char *strings = (const char *)(dtb + strings_off);
     fdt_context nodes[32];
     for (uint32_t i = 0; i < 32; ++i) nodes[i] = (fdt_context){0};
+    checked_range memory[MAX_DTB_MEMORY_RANGES];
+    checked_range devices[MAX_DTB_DEVICE_RANGES];
+    uint32_t memory_count = 0;
+    uint32_t device_count = 0;
+    int found_reserved_device = 0;
+    int device_overflow = 0;
     uint32_t depth = 0;
     while ((uint32_t)(end - cursor) >= 4) {
         uint32_t token = read_be32(cursor);
@@ -125,6 +160,7 @@ int byter_example_fdt_device_map_check(const void *blob,
             nodes[depth].ranges = 0;
             nodes[depth].ranges_size = 0;
             nodes[depth].has_ranges = 0;
+            nodes[depth].is_memory = depth == 2 && memory_node(name);
             nodes[depth].excluded = depth > 1 && nodes[depth - 1].excluded;
             if (depth == 2 && (memory_node(name) || text_equal((const char *)name, "chosen") ||
                 text_equal((const char *)name, "reserved-memory") ||
@@ -149,6 +185,20 @@ int byter_example_fdt_device_map_check(const void *blob,
                 nodes[depth].has_ranges = 1;
                 nodes[depth].ranges = cursor;
                 nodes[depth].ranges_size = length;
+            } else if (depth > 1 && nodes[depth].is_memory && text_equal(name, "reg")) {
+                uint32_t ac = nodes[depth - 1].address_cells;
+                uint32_t sc = nodes[depth - 1].size_cells;
+                uint32_t tuple_size = (ac + sc) * 4;
+                if (!ac || ac > 2 || !sc || sc > 2 || length % tuple_size) return 0;
+                for (uint32_t offset = 0; offset < length; offset += tuple_size) {
+                    checked_range region = {
+                        read_cells(cursor + offset, ac),
+                        read_cells(cursor + offset + ac * 4, sc)
+                    };
+                    if (!region.length || region.base > UINT64_MAX - region.length ||
+                        memory_count == MAX_DTB_MEMORY_RANGES) return 0;
+                    memory[memory_count++] = region;
+                }
             } else if (depth > 1 && !nodes[depth].excluded && text_equal(name, "reg")) {
                 uint32_t ac = nodes[depth - 1].address_cells;
                 uint32_t sc = nodes[depth - 1].size_cells;
@@ -159,8 +209,13 @@ int byter_example_fdt_device_map_check(const void *blob,
                             read_cells(cursor + offset, ac),
                             read_cells(cursor + offset + ac * 4, sc)
                         }, physical;
-                        if (resource.length && translate_reg(nodes, depth, resource, &physical) &&
-                            map_reserves(map, physical)) return 1;
+                        if (!resource.length || !translate_reg(nodes, depth, resource, &physical) ||
+                            !map_reserves(map, physical)) continue;
+                        found_reserved_device = 1;
+                        if (physical.base >= FOUR_GIB) {
+                            if (device_count == MAX_DTB_DEVICE_RANGES) device_overflow = 1;
+                            else devices[device_count++] = physical;
+                        }
                     }
                 }
             }
@@ -169,7 +224,22 @@ int byter_example_fdt_device_map_check(const void *blob,
         } else if (token == 4) {
             continue;
         } else if (token == 9) {
-            return 0;
+            if (depth != 0 || !found_reserved_device || device_overflow)
+                return BYTER_EXAMPLE_FDT_MAP_INVALID;
+            int found_high_external = 0;
+            for (uint32_t i = 0; i < device_count; ++i) {
+                int overlaps_ram = 0;
+                for (uint32_t j = 0; j < memory_count; ++j) {
+                    if (overlaps_range(devices[i], memory[j])) { overlaps_ram = 1; break; }
+                }
+                if (overlaps_ram) continue;
+                found_high_external = 1;
+                if (!range_is_mapped(devices[i], 0) ||
+                    !range_is_mapped(devices[i], 0xffff800000000000ULL))
+                    return BYTER_EXAMPLE_FDT_MAP_INVALID;
+            }
+            return found_high_external ? BYTER_EXAMPLE_FDT_MAP_HIGH_EXTERNAL_MAPPED
+                                       : BYTER_EXAMPLE_FDT_MAP_DEVICE_RESERVED;
         } else {
             return 0;
         }
