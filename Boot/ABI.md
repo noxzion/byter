@@ -35,7 +35,7 @@ claim full Limine Boot Protocol compatibility.
 | `BYTER_DTB_REQUEST_ID` | 0 | 0 | `dtb_ptr` | Original DTB pointer received from ABL. The response does not provide a DTB size. |
 | `BYTER_FRAMEBUFFER_REQUEST_ID` | 0 | 0 | One framebuffer pointer and its address, dimensions, pitch, bpp, RGB masks, and memory model | Parsed from a DTB `simple-framebuffer` node; otherwise the A059 fallback profile. If no framebuffer is available, `response` remains `NULL`. EDID and video modes are not provided. |
 | `BYTER_HHDM_REQUEST_ID` | 0 | 0 | `offset` | Fixed AArch64 HHDM base `0xffff800000000000`; maps the first 4 GiB, DTB RAM ranges, and framebuffer. |
-| `BYTER_MEMMAP_REQUEST_ID` | 0 | 0 | `entry_count`, pointer array of `{base, length, type}` entries | RAM ranges from DTB, split around `/reserved-memory`, FDT memory-reservation entries, shim, DTB, ELF `PT_LOAD` ranges, and framebuffer. Known DTB reservation ranges outside RAM are also returned as `RESERVED`. Limited to 512 sorted, non-overlapping entries; unrecognized MMIO/device ranges are omitted. |
+| `BYTER_MEMMAP_REQUEST_ID` | 0 | 0 | `entry_count`, pointer array of `{base, length, type}` entries | RAM ranges from DTB, split around `/reserved-memory`, FDT memory-reservation entries, shim, DTB, ELF `PT_LOAD` ranges, and framebuffer. Known reservations and device `reg` ranges translated through each parent bus `ranges` outside RAM are also returned as `RESERVED`. Untranslatable device ranges and ranges beyond the bounded input capacity are omitted. Limited to 512 sorted, non-overlapping output entries. |
 | `BYTER_EXECUTABLE_ADDRESS_REQUEST_ID` | 0 | 0 | `physical_base`, `virtual_base` | Lowest loaded `PT_LOAD` physical and virtual bases. The loader accepts AArch64 `ET_EXEC` segments with a uniform load bias, page-compatible addresses, and non-overlapping mappings; the example uses a higher-half VMA. |
 
 The current handoff enters at EL1 with the MMU and caches enabled, using a
@@ -49,10 +49,13 @@ registers, configures `MAIR_EL1`, `TCR_EL1`, `TTBR0_EL1`, `TTBR1_EL1`, and
 `SCTLR_EL1`, and enters at EL1. When starting at EL2 it clears trap controls and
 drops to EL1 first.
 
-The shim's memory map is still based on the DTB RAM and known reservations, not
-a complete firmware physical-address map. This implementation does not claim
-full Limine base-revision-0 compatibility; the tag currently negotiates the
-Byter handoff contract described here.
+The shim's memory map is still based on DTB RAM, reservations, and device ranges
+that can be translated unambiguously through `ranges`, not a complete firmware
+physical-address map. An absent or malformed bus mapping causes that device
+range to be omitted. The map does not imply that a device range is mapped in the
+HHDM. This implementation does not claim full Limine base-revision-0
+compatibility; the tag currently negotiates the Byter handoff contract
+described here.
 
 The center status square records boot progress and remains at the last stage
 reached if execution stops:
