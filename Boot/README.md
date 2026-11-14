@@ -23,11 +23,14 @@ Framebuffer shim получает из DTB-узла `simple-framebuffer`. Есл
 передаёт, используется изолированный проверенный профиль A059 в
 `platform/a059/framebuffer.c`. Shim отвечает на bootloader-info, DTB,
 framebuffer и memory-map запросы. Карта памяти строится по RAM и known
-reservations из DTB, с отдельными типами для областей загрузчика, ELF-ядра и
-framebuffer. Shim включает MMU и передаёт ядру identity map для RAM и boot data,
+reservations из DTB и однозначно переведённым device `reg` из DTB, с отдельными
+типами для областей загрузчика, ELF-ядра и framebuffer. Shim включает MMU и
+передаёт ядру identity map для RAM и boot data,
 а сегменты ядра отображает по ELF VMA с правами `PT_LOAD`. HHDM отображает RAM
 первые 4 GiB, RAM из DTB и framebuffer. Пример запрашивает Byter handoff revision 0
 и меняет цвет центрального квадрата после прохождения каждого этапа. Если
 загрузка останавливается, квадрат сохраняет цвет последнего достигнутого этапа.
-Memory map пока ограничена RAM и reservations из DTB, поэтому полной совместимости
-с Limine Boot Protocol ещё нет.
+Memory map не является полной картой физических областей: она включает только
+RAM и известные reservations/device ranges из DTB. В диагностическом примере
+голубой маркер в левом верхнем углу подтверждает, что device `reg` найден в
+карте. Полной совместимости с Limine Boot Protocol ещё нет.

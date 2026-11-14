@@ -37,14 +37,17 @@ $(OUT)/boot-shim.elf: $(OUT)/entry.o $(OUT)/elf_loader.o $(OUT)/a059_framebuffer
 $(OUT)/boot-shim.bin: $(OUT)/boot-shim.elf
 	$(OBJCOPY) -O binary $< $@
 
-$(OUT)/kernel.o: ../example/main.c include/byter.h | $(OUT)
+$(OUT)/kernel.o: ../example/main.c ../example/fdt_diag.h include/byter.h | $(OUT)
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+$(OUT)/fdt_diag.o: ../example/fdt_diag.c ../example/fdt_diag.h include/byter.h | $(OUT)
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 $(OUT)/kernel_vectors.o: ../example/vectors.S | $(OUT)
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-$(OUT)/kernel.elf: $(OUT)/kernel.o $(OUT)/kernel_vectors.o ../example/kernel.ld
-	$(LLD) -T ../example/kernel.ld --build-id=none --no-undefined $(OUT)/kernel.o $(OUT)/kernel_vectors.o -o $@
+$(OUT)/kernel.elf: $(OUT)/kernel.o $(OUT)/fdt_diag.o $(OUT)/kernel_vectors.o ../example/kernel.ld
+	$(LLD) -T ../example/kernel.ld --build-id=none --no-undefined $(OUT)/kernel.o $(OUT)/fdt_diag.o $(OUT)/kernel_vectors.o -o $@
 
 FORCE:
 

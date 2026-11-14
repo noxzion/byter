@@ -1,4 +1,5 @@
 #include "byter.h"
+#include "fdt_diag.h"
 
 #define BYTER_REQUEST __attribute__((used, section(".byter_requests"), aligned(8)))
 
@@ -17,6 +18,11 @@ static volatile struct byter_framebuffer_request framebuffer_request BYTER_REQUE
 
 static volatile struct byter_memmap_request memmap_request BYTER_REQUEST = {
     .id = BYTER_MEMMAP_REQUEST_ID,
+    .revision = 0,
+};
+
+static volatile struct byter_dtb_request dtb_request BYTER_REQUEST = {
+    .id = BYTER_DTB_REQUEST_ID,
     .revision = 0,
 };
 
@@ -124,6 +130,19 @@ static void show_stage(const struct byter_framebuffer *fb,
     __asm__ volatile("dsb sy" ::: "memory");
 }
 
+static void show_diagnostic_marker(const struct byter_framebuffer *fb,
+                                   uint8_t red, uint8_t green, uint8_t blue) {
+    volatile uint32_t *pixels = fb->address;
+    uint32_t stride = (uint32_t)(fb->pitch / 4);
+    uint32_t color = rgb(fb, red, green, blue);
+    uint32_t side = fb->width < 32 ? (uint32_t)fb->width : 32;
+    if (fb->height < side) side = (uint32_t)fb->height;
+    for (uint32_t y = 0; y < side; ++y)
+        for (uint32_t x = 0; x < side; ++x)
+            pixels[y * stride + x] = color;
+    __asm__ volatile("dsb sy" ::: "memory");
+}
+
 static int valid_framebuffer_shape(const struct byter_framebuffer *fb) {
     return fb && fb->address && fb->memory_model == BYTER_FRAMEBUFFER_RGB && fb->bpp == 32 &&
         fb->width >= 32 && fb->height >= 32 && fb->width <= 16384 && fb->height <= 16384 &&
@@ -163,6 +182,12 @@ void _start(void) {
     if (!framebuffer_is_hhdm(fb, hhdm, memmap)) wait_forever();
     show_stage(fb, 0x06, 0xb6, 0xd4); /* Framebuffer HHDM mapping accepted. */
 
+    struct byter_dtb_response *dtb = dtb_request.response;
+    if (!dtb || dtb->revision != 0 ||
+        !byter_example_fdt_device_map_check(dtb->dtb_ptr, memmap)) {
+        show_diagnostic_marker(fb, 0xff, 0x00, 0x00); /* DTB device map check failed. */
+        wait_forever();
+    }
     volatile uint32_t *pixels = fb->address;
     uint32_t stride = (uint32_t)(fb->pitch / 4);
     for (uint32_t y = 0; y < fb->height; ++y)
@@ -179,6 +204,7 @@ void _start(void) {
         for (uint32_t x = 0; x < side; ++x)
             pixels[(top + y) * stride + left + x] = square_color;
 
+    show_diagnostic_marker(fb, 0x00, 0xff, 0xff); /* A DTB device reg is RESERVED in the map. */
     __asm__ volatile("dsb sy" ::: "memory");
     wait_forever();
 }
