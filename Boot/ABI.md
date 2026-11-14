@@ -34,14 +34,15 @@ claim full Limine Boot Protocol compatibility.
 | `BYTER_BOOTLOADER_INFO_REQUEST_ID` | 0 | 0 | `name`, `version` | Static strings `Byter AArch64 shim` and `0.1`. |
 | `BYTER_DTB_REQUEST_ID` | 0 | 0 | `dtb_ptr` | Original DTB pointer received from ABL. The response does not provide a DTB size. |
 | `BYTER_FRAMEBUFFER_REQUEST_ID` | 0 | 0 | One framebuffer pointer and its address, dimensions, pitch, bpp, RGB masks, and memory model | Parsed from a DTB `simple-framebuffer` node; otherwise the A059 fallback profile. If no framebuffer is available, `response` remains `NULL`. EDID and video modes are not provided. |
-| `BYTER_HHDM_REQUEST_ID` | 0 | 0 | `offset` | Fixed AArch64 HHDM base `0xffff800000000000`; maps the first 4 GiB, DTB RAM ranges, and framebuffer. |
+| `BYTER_HHDM_REQUEST_ID` | 0 | 0 | `offset` | Fixed AArch64 HHDM base `0xffff800000000000`; maps the first 4 GiB, DTB RAM, framebuffer, and known reserved ranges above 4 GiB. |
 | `BYTER_MEMMAP_REQUEST_ID` | 0 | 0 | `entry_count`, pointer array of `{base, length, type}` entries | RAM ranges from DTB, split around `/reserved-memory`, FDT memory-reservation entries, shim, DTB, ELF `PT_LOAD` ranges, and framebuffer. Known reservations and device `reg` ranges translated through each parent bus `ranges` outside RAM are also returned as `RESERVED`. Untranslatable device ranges and ranges beyond the bounded input capacity are omitted. Limited to 512 sorted, non-overlapping output entries. |
 | `BYTER_EXECUTABLE_ADDRESS_REQUEST_ID` | 0 | 0 | `physical_base`, `virtual_base` | Lowest loaded `PT_LOAD` physical and virtual bases. The loader accepts AArch64 `ET_EXEC` segments with a uniform load bias, page-compatible addresses, and non-overlapping mappings; the example uses a higher-half VMA. |
 
 The current handoff enters at EL1 with the MMU and caches enabled, using a
 4 KiB translation granule and 48-bit virtual addressing. Base-revision-0
-identity mappings cover `0x1000..4 GiB` and all DTB RAM ranges; HHDM mappings
-cover `0..4 GiB`, those RAM ranges, and framebuffer. Physical address
+identity mappings cover `0x1000..4 GiB`, all DTB RAM ranges, and known reserved
+ranges above 4 GiB; HHDM mappings cover `0..4 GiB`, those RAM/reserved ranges,
+and framebuffer. Physical address
 `0..0x1000` is not marked usable. The example enters at or above
 `0xffffffff80000000`, installs its own exception vector table, and runs with
 interrupts masked. The handoff provides a 192 KiB stack, zeroes general-purpose
@@ -54,10 +55,10 @@ recovered.
 The shim's memory map is still based on DTB RAM, reservations, and device ranges
 that can be translated unambiguously through `ranges`, not a complete firmware
 physical-address map. An absent or malformed bus mapping causes that device
-range to be omitted. The map does not imply that a device range is mapped in the
-HHDM. This implementation does not claim full Limine base-revision-0
-compatibility; the tag currently negotiates the Byter handoff contract
-described here.
+range to be omitted. Known map regions are identity- and HHDM-mapped as required
+by the selected base-revision-0 subset. This implementation does not claim full
+Limine base-revision-0 compatibility; the tag currently negotiates the Byter
+handoff contract described here.
 
 The center status square records boot progress and remains at the last stage
 reached if execution stops:

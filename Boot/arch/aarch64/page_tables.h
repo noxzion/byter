@@ -41,6 +41,7 @@ enum byter_aarch64_page_tables_stage {
 int byter_aarch64_build_page_tables(
     uint8_t *shim, uint64_t shim_size,
     const struct byter_aarch64_range *memory, uint32_t memory_count,
+    const struct byter_aarch64_range *reserved, uint32_t reserved_count,
     struct byter_aarch64_range framebuffer, int has_framebuffer,
     const struct byter_aarch64_load_segment *segments, uint32_t segment_count,
     struct byter_aarch64_page_tables *result, uint32_t *failure_stage);

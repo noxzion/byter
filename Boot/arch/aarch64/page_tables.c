@@ -163,6 +163,31 @@ static int map_ram_range(page_table_state *state, range region, uint64_t virtual
     return 1;
 }
 
+static int map_reserved_above_4g(page_table_state *state,
+                                 const struct byter_aarch64_range *memory,
+                                 uint32_t memory_count,
+                                 const struct byter_aarch64_range *reserved,
+                                 uint32_t reserved_count, range framebuffer_pages,
+                                 uint64_t virtual_offset) {
+    for (uint32_t i = 0; i < reserved_count; ++i) {
+        range aligned;
+        if (!align_range((range){reserved[i].base, reserved[i].length}, &aligned)) return 0;
+        range pieces[MAX_MAP_RANGES] = {aligned};
+        uint32_t count = 1;
+        for (uint32_t j = 0; j < memory_count; ++j) {
+            range ram;
+            if (!align_range((range){memory[j].base, memory[j].length}, &ram) ||
+                !subtract_range(pieces, &count, ram)) return 0;
+        }
+        if (!subtract_range(pieces, &count, (range){0, BASE_REVISION_ZERO_IDENTITY_SIZE}) ||
+            (framebuffer_pages.length &&
+             !subtract_range(pieces, &count, framebuffer_pages))) return 0;
+        for (uint32_t j = 0; j < count; ++j)
+            if (!map_ram_range(state, pieces[j], virtual_offset)) return 0;
+    }
+    return 1;
+}
+
 static int map_special_range(page_table_state *state, range region, uint64_t attr_index,
                              uint32_t flags, uint64_t virtual_offset) {
     range aligned;
@@ -217,11 +242,13 @@ static int physical_size(uint64_t *max_address, uint8_t *pa_range, uint32_t *pa_
 int byter_aarch64_build_page_tables(
     uint8_t *shim, uint64_t shim_size,
     const struct byter_aarch64_range *memory, uint32_t memory_count,
+    const struct byter_aarch64_range *reserved, uint32_t reserved_count,
     struct byter_aarch64_range framebuffer, int has_framebuffer,
     const struct byter_aarch64_load_segment *segments, uint32_t segment_count,
     struct byter_aarch64_page_tables *result, uint32_t *failure_stage) {
     if (failure_stage) *failure_stage = BYTER_PT_STAGE_INIT;
-    if (!shim || !memory || !memory_count || !segments || !segment_count || !result ||
+    if (!shim || !memory || !memory_count || (!reserved && reserved_count) ||
+        !segments || !segment_count || !result ||
         !failure_stage || shim_size <= TABLE_POOL_OFFSET || shim_size < 0x400000ULL) return 0;
 
     page_table_state state = {0};
@@ -266,6 +293,8 @@ int byter_aarch64_build_page_tables(
     *failure_stage = BYTER_PT_STAGE_IDENTITY_RAM;
     for (uint32_t i = 0; i < identity_count; ++i)
         if (!map_ram_range(&state, identity_ranges[i], 0)) return 0;
+    if (!map_reserved_above_4g(&state, memory, memory_count, reserved, reserved_count,
+                               framebuffer_pages, 0)) return 0;
     *failure_stage = BYTER_PT_STAGE_IDENTITY_SHIM;
     if (!map_special_range(&state, (range){(uint64_t)shim, shim_size}, ATTR_NORMAL_WB,
                            PF_W | PF_X, 0)) return 0;
@@ -294,6 +323,8 @@ int byter_aarch64_build_page_tables(
     *failure_stage = BYTER_PT_STAGE_HHDM_RAM;
     for (uint32_t i = 0; i < hhdm_count; ++i)
         if (!map_ram_range(&state, hhdm_ranges[i], BYTER_AARCH64_HHDM_OFFSET)) return 0;
+    if (!map_reserved_above_4g(&state, memory, memory_count, reserved, reserved_count,
+                               framebuffer_pages, BYTER_AARCH64_HHDM_OFFSET)) return 0;
     *failure_stage = BYTER_PT_STAGE_HHDM_FRAMEBUFFER;
     if (has_framebuffer && !map_special_range(&state,
         (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W | PF_X,

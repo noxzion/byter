@@ -1074,11 +1074,17 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
                           usable, usable_count, memmap_entries, &memmap_count)) return 0;
     show_boot_stage(STAGE_MEMMAP);
     struct byter_aarch64_range page_table_memory[MAX_RANGES];
+    struct byter_aarch64_range page_table_reserved[MAX_RANGES];
     for (u32 i = 0; i < memory_count; ++i)
         page_table_memory[i] = (struct byter_aarch64_range){memory[i].base, memory[i].length};
+    for (u32 i = 0; i < reserved_count; ++i)
+        page_table_reserved[i] = (struct byter_aarch64_range){
+            reserved_pages[i].base, reserved_pages[i].length
+        };
     struct byter_aarch64_page_tables page_tables;
     u32 page_table_failure_stage;
     if (!byter_aarch64_build_page_tables(shim, shim_size, page_table_memory, memory_count,
+            page_table_reserved, reserved_count,
             (struct byter_aarch64_range){framebuffer_range.base, framebuffer_range.length},
             has_framebuffer, page_table_segments, segment_count, &page_tables, &page_table_failure_stage)) {
         static const u32 failure_colors[] = {
