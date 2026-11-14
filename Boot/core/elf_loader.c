@@ -43,7 +43,9 @@ enum {
     STAGE_PT_IDENTITY_RAM_FAILED = 0x00e5ff,
     STAGE_PT_IDENTITY_SHIM_FAILED = 0x4361ee,
     STAGE_PT_IDENTITY_FB_FAILED = 0x90e0ef,
-    STAGE_PT_HHDM_FAILED = 0x80b918,
+    STAGE_PT_HHDM_LOW_FAILED = 0x80b918,
+    STAGE_PT_HHDM_RAM_FAILED = 0x4caf50,
+    STAGE_PT_HHDM_FB_FAILED = 0xc0ca33,
     STAGE_PT_KERNEL_FAILED = 0xf72585,
     STAGE_PT_CLEAN_FAILED = 0x3a0ca3,
     STAGE_ELF_LOADED = 0xf97316,
@@ -852,7 +854,8 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *elf, u64 elf_size, u64 shim_size, u64
             0, STAGE_PT_INIT_FAILED, STAGE_PT_RANGES_FAILED,
             STAGE_PT_IDENTITY_LOW_FAILED, STAGE_PT_IDENTITY_RAM_FAILED,
             STAGE_PT_IDENTITY_SHIM_FAILED, STAGE_PT_IDENTITY_FB_FAILED,
-            STAGE_PT_HHDM_FAILED, STAGE_PT_KERNEL_FAILED, STAGE_PT_CLEAN_FAILED
+            STAGE_PT_HHDM_LOW_FAILED, STAGE_PT_HHDM_RAM_FAILED,
+            STAGE_PT_HHDM_FB_FAILED, STAGE_PT_KERNEL_FAILED, STAGE_PT_CLEAN_FAILED
         };
         if (page_table_failure_stage < sizeof(failure_colors) / sizeof(failure_colors[0]))
             show_boot_stage(failure_colors[page_table_failure_stage]);

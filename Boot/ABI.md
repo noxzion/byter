@@ -74,7 +74,9 @@ reached if execution stops:
 | Bright cyan | Other RAM identity mapping failed |
 | Blue | Shim identity mapping failed |
 | Pale cyan | Framebuffer identity mapping failed |
-| Lime | HHDM mappings failed |
+| Lime | Low HHDM mappings failed |
+| Green | Other RAM HHDM mappings failed |
+| Yellow-green | Framebuffer HHDM mapping failed |
 | Rose | Kernel mappings failed |
 | Deep indigo | Page table cache clean failed |
 | Sky | Page tables built |

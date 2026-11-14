@@ -288,11 +288,13 @@ int byter_aarch64_build_page_tables(
         (has_framebuffer && !subtract_range(hhdm_ranges, &hhdm_count, framebuffer_pages)) ||
         (has_framebuffer && !subtract_range(low_hhdm_ranges, &low_hhdm_count, framebuffer_pages)))
         return 0;
-    *failure_stage = BYTER_PT_STAGE_HHDM;
+    *failure_stage = BYTER_PT_STAGE_HHDM_LOW;
     for (uint32_t i = 0; i < low_hhdm_count; ++i)
         if (!map_ram_range(&state, low_hhdm_ranges[i], BYTER_AARCH64_HHDM_OFFSET)) return 0;
+    *failure_stage = BYTER_PT_STAGE_HHDM_RAM;
     for (uint32_t i = 0; i < hhdm_count; ++i)
         if (!map_ram_range(&state, hhdm_ranges[i], BYTER_AARCH64_HHDM_OFFSET)) return 0;
+    *failure_stage = BYTER_PT_STAGE_HHDM_FRAMEBUFFER;
     if (has_framebuffer && !map_special_range(&state,
         (range){framebuffer_pages.base, framebuffer_pages.length}, ATTR_NORMAL_NC, PF_W | PF_X,
         BYTER_AARCH64_HHDM_OFFSET)) return 0;
