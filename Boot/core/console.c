@@ -94,7 +94,7 @@ void byter_console_write(const char *text) {
     while (*text) {
         u8 character = (u8)*text++;
         if (character == '\n') next_line();
-        else if (character == '\r') continue;
+        else if (character == '\r') cursor_x = MARGIN;
         else if (character == '\t') {
             for (u32 i = 0; i < 4; ++i) draw_glyph(' ');
         } else {
@@ -104,11 +104,6 @@ void byter_console_write(const char *text) {
     __asm__ volatile("dsb sy" ::: "memory");
 }
 
-int byter_console_clear(void) {
-    if (!ready) return 0;
-    fill(0, 0, (u32)console_fb.width, (u32)console_fb.height, background);
-    cursor_x = MARGIN;
-    cursor_y = MARGIN;
-    __asm__ volatile("dsb sy" ::: "memory");
-    return 1;
+int byter_console_available(void) {
+    return ready;
 }

@@ -5,6 +5,6 @@
 
 void byter_console_set_framebuffer(const struct byter_framebuffer *framebuffer);
 void byter_console_write(const char *text);
-int byter_console_clear(void);
+int byter_console_available(void);
 
 #endif

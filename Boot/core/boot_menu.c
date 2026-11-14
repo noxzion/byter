@@ -31,20 +31,23 @@ static void wait_ms(u32 milliseconds, u64 frequency) {
     }
 }
 
-static void show_menu(u32 seconds_left) {
-    byter_console_clear();
+static void draw_menu(void) {
     byter_console_write("BYTER BOOT MENU\n\n");
     byter_console_write("  Nothing Phone (3a)\n\n");
     byter_console_write("  > Start configured ELF\n\n");
     byter_console_write("  VOL +/-  reset timer   POWER  boot\n");
-    byter_console_write("  Automatic boot in ");
+    byter_console_write("  Automatic boot in 5 seconds");
+}
+
+static void show_countdown(u32 seconds_left) {
+    byter_console_write("\r  Automatic boot in ");
     char digit[2] = {(char)('0' + seconds_left), 0};
     byter_console_write(digit);
-    byter_console_write(" seconds\n");
+    byter_console_write(" seconds ");
 }
 
 int byter_boot_menu_wait(void) {
-    if (!byter_console_clear()) return 1;
+    if (!byter_console_available()) return 1;
     byter_console_write("Checking phone buttons...\n");
     if (!byter_a059_buttons_init()) {
         byter_console_write("Buttons unavailable; continuing boot.\n");
@@ -59,7 +62,8 @@ int byter_boot_menu_wait(void) {
     u64 timeout_ticks = frequency * MENU_TIMEOUT_SECONDS;
     u64 start = counter();
     unsigned previous = 0;
-    u32 shown_seconds = MENU_TIMEOUT_SECONDS + 1;
+    u32 shown_seconds = MENU_TIMEOUT_SECONDS;
+    draw_menu();
 
     for (;;) {
         unsigned pressed;
@@ -70,7 +74,7 @@ int byter_boot_menu_wait(void) {
         unsigned down = pressed & ~previous;
         previous = pressed;
         if (down & BYTER_BUTTON_POWER) {
-            byter_console_write("Power selected the configured ELF.\n");
+            byter_console_write("\nPower selected the configured ELF.\n");
             return 1;
         }
         /* There is one configured ELF for now, so volume keys restart its timer. */
@@ -87,7 +91,7 @@ int byter_boot_menu_wait(void) {
             left = (u32)((remaining + frequency - 1) / frequency);
         }
         if (left != shown_seconds) {
-            show_menu(left);
+            show_countdown(left);
             shown_seconds = left;
         }
         wait_ms(POLL_INTERVAL_MS, frequency);
