@@ -1,6 +1,6 @@
 #include "boot_menu.h"
 #include "console.h"
-#include "../platform/a059/buttons.h"
+#include "../platform/platform.h"
 
 typedef unsigned long long u64;
 typedef unsigned int u32;
@@ -56,9 +56,11 @@ static void draw_menu(const struct byter_boot_option *options, u32 option_count,
 
     byter_console_set_cursor(centered_x(15, width), y);
     byter_console_write("BYTER BOOT MENU\n");
-    byter_console_set_cursor(centered_x(text_length("Nothing Phone (3a)"), width),
+    const char *platform_name = byter_platform_name();
+    byter_console_set_cursor(centered_x(text_length(platform_name), width),
                              y + CELL_HEIGHT * 2);
-    byter_console_write("Nothing Phone (3a)\n\n");
+    byter_console_write(platform_name);
+    byter_console_write("\n\n");
     for (u32 i = 0; i < option_count; ++i) {
         u32 name_length = 0;
         while (name_length < MAX_LINE_CHARS - 2 && options[i].name[name_length]) ++name_length;
@@ -103,7 +105,7 @@ unsigned int byter_boot_menu_wait(const struct byter_boot_option *options,
     if (!options || !option_count || option_count > BYTER_BOOT_MAX_OPTIONS) return 0;
     if (!byter_console_available()) return 0;
     byter_console_write("Checking phone buttons...\n");
-    if (!byter_a059_buttons_init()) {
+    if (!byter_platform_buttons_init()) {
         byter_console_write("Buttons unavailable; continuing boot.\n");
         return 0;
     }
@@ -125,27 +127,27 @@ unsigned int byter_boot_menu_wait(const struct byter_boot_option *options,
 
     for (;;) {
         unsigned pressed;
-        if (!byter_a059_buttons_read(&pressed)) {
+        if (!byter_platform_buttons_read(&pressed)) {
             byter_console_write("Button read failed; continuing boot.\n");
             return 0;
         }
         unsigned down = pressed & ~previous;
         previous = pressed;
-        if (down & BYTER_BUTTON_POWER) {
+        if (down & BYTER_PLATFORM_BUTTON_POWER) {
             byter_console_write("\nPower selected the boot option.\n");
             return selected;
         }
-        if (down & BYTER_BUTTON_ESSENTIAL) {
+        if (down & BYTER_PLATFORM_BUTTON_ESSENTIAL) {
             byter_console_write("\nReturning to Fastboot...\n");
-            if (!byter_a059_reboot_fastboot())
+            if (!byter_platform_reboot_fastboot())
                 byter_console_write("Fastboot reboot request failed.\n");
         }
         u32 old_selection = selected;
-        if (down & BYTER_BUTTON_VOLUME_UP)
+        if (down & BYTER_PLATFORM_BUTTON_VOLUME_UP)
             selected = selected ? selected - 1 : option_count - 1;
-        else if (down & BYTER_BUTTON_VOLUME_DOWN)
+        else if (down & BYTER_PLATFORM_BUTTON_VOLUME_DOWN)
             selected = selected + 1 == option_count ? 0 : selected + 1;
-        if (down & (BYTER_BUTTON_VOLUME_UP | BYTER_BUTTON_VOLUME_DOWN)) {
+        if (down & (BYTER_PLATFORM_BUTTON_VOLUME_UP | BYTER_PLATFORM_BUTTON_VOLUME_DOWN)) {
             start = counter();
             shown_seconds = MENU_TIMEOUT_SECONDS + 1;
             update_selection(old_selection, selected, row_x, row_y, countdown_x, countdown_y);
