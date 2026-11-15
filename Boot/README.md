@@ -25,6 +25,8 @@ include/byter.h           публичные структуры и ID Byter ABI
 entry=Byter example
 kernel=build/kernel.elf
 cmdline=byter.example=1
+# Repeat module= to attach files to this entry.
+# module=build/initrd.cpio
 
 entry=Recovery
 kernel=build/recovery.elf
@@ -32,17 +34,24 @@ cmdline=mode=recovery
 ```
 
 Каждый `entry=` начинает новый блок; следующие `kernel=` и `cmdline=` относятся
-к нему. Пути относительны к конфигу. Поддерживается до 16 пунктов, название — до
-63 печатных ASCII-символов. Название показывается в меню; Volume Up/Down
-перемещают выбор, Power запускает выбранный ELF, Essential Key запрашивает
-возврат в Fastboot, таймаут выбирает первый пункт.
+к нему. Пути kernel и module относительны к конфигу. Повторяющиеся
+`module=PATH` прикрепляют файлы к текущему пункту; всего поддерживается до
+128 модулей в каталоге. Название показывается в меню; Volume Up/Down перемещают
+выбор, Power запускает выбранный ELF, Essential Key запрашивает возврат в
+Fastboot, таймаут выбирает первый пункт.
 Framebuffer shim получает из DTB-узла `simple-framebuffer`. Если ABL его не
 передаёт, используется изолированный проверенный профиль A059 в
-`platform/a059/framebuffer.c`. Shim отвечает на bootloader-info, DTB,
-framebuffer и memory-map запросы. Карта памяти строится по RAM и known
-reservations из DTB и однозначно переведённым device `reg` из DTB, с отдельными
-типами для областей загрузчика, ELF-ядра и framebuffer. Shim включает MMU и
-передаёт ядру identity map для RAM и boot data,
+`platform/a059/framebuffer.c`. Shim отвечает на bootloader-info, executable
+cmdline, DTB, framebuffer, HHDM, memory-map, executable-address и revision-0
+module requests. Module response содержит файлы выбранного пункта; payload
+встраивается в Android kernel Image и помечается в memory map как
+`EXECUTABLE_AND_MODULES`. Строки module пока пустые. Карта памяти строится по
+RAM и known reservations из DTB и однозначно переведённым device `reg` из DTB,
+с отдельными типами для областей загрузчика, ELF-ядра, модулей и framebuffer.
+Локальный диагностический `example` запрашивает ровно один модуль из
+`example/module_payload.bin`, сверяет его path, size и содержимое, а зелёный
+маркер в правом верхнем углу подтверждает запрос и сохранение страниц модуля.
+Shim включает MMU и передаёт ядру identity map для RAM и boot data,
 а сегменты ядра отображает по ELF VMA с правами `PT_LOAD`. HHDM отображает RAM
 первые 4 GiB, RAM из DTB и framebuffer. Shim сразу пишет ход загрузки в
 framebuffer встроенным 8×16 шрифтом, не очищая весь экран; при остановке остаётся
