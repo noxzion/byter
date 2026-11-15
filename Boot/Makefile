@@ -17,10 +17,13 @@ shim: $(OUT)/boot-shim.bin
 $(OUT):
 	mkdir -p $(OUT)
 
-$(OUT)/entry.o: $(ENTRY) | $(OUT)
+$(OUT)/entry.o: $(ENTRY) $(ARCH)/handoff.h | $(OUT)
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-$(OUT)/elf_loader.o: $(CORE)/elf_loader.c $(CORE)/console.h $(CORE)/boot_menu.h $(CORE)/boot_catalog.h include/byter.h $(ARCH)/page_tables.h platform/platform.h | $(OUT)
+$(OUT)/handoff.o: $(ARCH)/handoff.S $(ARCH)/handoff.h | $(OUT)
+	$(CLANG) $(CFLAGS) -c $< -o $@
+
+$(OUT)/elf_loader.o: $(CORE)/elf_loader.c $(CORE)/console.h $(CORE)/boot_menu.h $(CORE)/boot_catalog.h include/byter.h $(ARCH)/page_tables.h $(ARCH)/handoff.h platform/platform.h | $(OUT)
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
 $(OUT)/boot_catalog.o: $(CORE)/boot_catalog.c $(CORE)/boot_catalog.h | $(OUT)
@@ -47,8 +50,8 @@ $(OUT)/framebuffer.o: $(PLATFORM_DIR)/framebuffer.c $(PLATFORM_DIR)/framebuffer.
 $(OUT)/page_tables.o: $(ARCH)/page_tables.c $(ARCH)/page_tables.h | $(OUT)
 	$(CLANG) $(CFLAGS) -c $< -o $@
 
-$(OUT)/boot-shim.elf: $(OUT)/entry.o $(OUT)/elf_loader.o $(OUT)/console.o $(OUT)/boot_catalog.o $(OUT)/boot_menu.o $(OUT)/buttons.o $(OUT)/framebuffer.o $(OUT)/platform_fdt.o $(OUT)/platform.o $(OUT)/page_tables.o $(ARCH)/image.ld
-	$(LLD) -T $(ARCH)/image.ld --build-id=none --no-undefined $(OUT)/entry.o $(OUT)/elf_loader.o $(OUT)/console.o $(OUT)/boot_catalog.o $(OUT)/boot_menu.o $(OUT)/buttons.o $(OUT)/framebuffer.o $(OUT)/platform_fdt.o $(OUT)/platform.o $(OUT)/page_tables.o -o $@
+$(OUT)/boot-shim.elf: $(OUT)/entry.o $(OUT)/handoff.o $(OUT)/elf_loader.o $(OUT)/console.o $(OUT)/boot_catalog.o $(OUT)/boot_menu.o $(OUT)/buttons.o $(OUT)/framebuffer.o $(OUT)/platform_fdt.o $(OUT)/platform.o $(OUT)/page_tables.o $(ARCH)/image.ld
+	$(LLD) -T $(ARCH)/image.ld --build-id=none --no-undefined $(OUT)/entry.o $(OUT)/handoff.o $(OUT)/elf_loader.o $(OUT)/console.o $(OUT)/boot_catalog.o $(OUT)/boot_menu.o $(OUT)/buttons.o $(OUT)/framebuffer.o $(OUT)/platform_fdt.o $(OUT)/platform.o $(OUT)/page_tables.o -o $@
 
 $(OUT)/boot-shim.bin: $(OUT)/boot-shim.elf
 	$(OBJCOPY) -O binary $< $@

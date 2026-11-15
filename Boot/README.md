@@ -9,6 +9,7 @@ platform/a059/platform.c  адаптер имени устройства, frameb
 platform/fdt.c            разбор FDT в нормализованные boot info
 platform/platform.h        интерфейс платформы для общего загрузчика и меню
 arch/aarch64/page_tables.c таблицы страниц и права PT_LOAD
+arch/aarch64/handoff.S     общий AArch64 переход на EL1 и включение MMU
 arch/aarch64/image.ld      linker script shim
 core/elf_loader.c          общая проверка ELF и ответы Byter ABI
 include/byter.h            публичные структуры и ID Byter ABI
@@ -19,8 +20,10 @@ include/byter.h            публичные структуры и ID Byter ABI
 Общий ELF loader и меню используют `platform/platform.h`, а A059-специфичные
 вход ABL, имя, framebuffer fallback и кнопки находятся в `platform/a059/`.
 FDT parser возвращает нормализованные диапазоны памяти и framebuffer metadata.
-Это первый шаг разделения: ARM64 handoff пока находится в A059 entry, а новый
-телефон потребует отдельного platform adapter и зафиксированного ABL-контракта.
+Общий ARM64 переход на EL1 и включение таблиц страниц вынесены в
+`arch/aarch64/handoff.S`; A059 entry передаёт ему заполненный контекст.
+Новый телефон потребует отдельного platform adapter и зафиксированного
+ABL-контракта.
 
 Собрать только загрузчик можно из корня проекта командой `make -C Boot shim`;
 результат `Boot/build/boot-shim.bin` используется потребляющим проектом.

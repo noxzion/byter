@@ -1,6 +1,7 @@
 #include "byter.h"
 #include "../platform/platform.h"
 #include "../arch/aarch64/page_tables.h"
+#include "../arch/aarch64/handoff.h"
 #include "console.h"
 #include "boot_menu.h"
 #include "boot_catalog.h"
@@ -28,7 +29,6 @@ void *memcpy(void *destination, const void *source, u64 length) {
 #define STACK_SIZE 0x30000ULL
 
 typedef byter_platform_range range;
-typedef struct { u64 entry, ttbr0, ttbr1, tcr; } boot_context;
 typedef byter_platform_framebuffer_info framebuffer_info;
 
 
@@ -857,7 +857,9 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *catalog, u64 catalog_size,
                      hhdm_response, framebuffer_result, memmap_response,
                      executable_address_response, module_response, hhdm_offset);
     log_boot_stage("Boot protocol responses ready");
-    boot_context *context = (boot_context *)(handoff + HANDOFF_SIZE - sizeof(*context));
-    *context = (boot_context){eh->entry, page_tables.ttbr0, page_tables.ttbr1, page_tables.tcr};
+    struct byter_aarch64_handoff_context *context = (struct byter_aarch64_handoff_context *)(handoff + HANDOFF_SIZE - sizeof(*context));
+    *context = (struct byter_aarch64_handoff_context){
+        eh->entry, page_tables.ttbr0, page_tables.ttbr1, page_tables.tcr
+    };
     return (u64)context;
 }
