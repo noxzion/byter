@@ -156,7 +156,8 @@ Shim загружает AArch64 ELF64 `ET_EXEC` по `p_paddr`, отобража
 
 **Статус:** разделение начато. Общий ELF loader и меню работают через
 `platform/platform.h`; FDT разбор вынесен из loader, а A059 entry, имя, framebuffer
-fallback и кнопки собраны под `platform/a059/`. Сборка shim проходит. ARM64 handoff
+fallback и кнопки собраны под `platform/a059/`. После изменений shim собран и
+проверен на A059: загрузка проходит, ядро рисует зелёный квадрат. ARM64 handoff
 пока остаётся в A059 entry; другие телефоны ещё не подключались.
 
 - Завершить отделение общего ARM64 handoff, Limine ABI и упаковщика от A059 ABL
