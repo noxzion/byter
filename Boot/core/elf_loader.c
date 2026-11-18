@@ -138,6 +138,50 @@ static int overlaps(range a, range b) {
     return a.base < b.base + b.length && b.base < a.base + a.length;
 }
 
+static int align_up_u64(u64 value, u64 alignment, u64 *result) {
+    if (!alignment || (alignment & (alignment - 1)) || value > ~0ULL - (alignment - 1))
+        return 0;
+    *result = (value + alignment - 1) & ~(alignment - 1);
+    return 1;
+}
+
+/* Limine's ELF loader allocates PT_LOAD storage from usable memory and derives
+ * each physical segment from its VMA. p_paddr is not treated as a reservation. */
+static int find_kernel_load_base(range *memory, u32 memory_count,
+                                 range *reserved, u32 reserved_count,
+                                 range shim, range dtb, range *modules, u32 module_count,
+                                 range framebuffer, int has_framebuffer,
+                                 u64 size, u64 alignment, u64 *base) {
+    range blocked[MAX_RANGES + BYTER_BOOT_MAX_MODULES + 4];
+    u32 blocked_count = 0;
+    for (u32 i = 0; i < reserved_count; ++i) blocked[blocked_count++] = reserved[i];
+    blocked[blocked_count++] = shim;
+    blocked[blocked_count++] = dtb;
+    blocked[blocked_count++] = (range){0, 0x1000};
+    for (u32 i = 0; i < module_count; ++i) blocked[blocked_count++] = modules[i];
+    if (has_framebuffer) blocked[blocked_count++] = framebuffer;
+
+    for (u32 r = 0; r < memory_count; ++r) {
+        if (!memory[r].length || memory[r].base > ~0ULL - memory[r].length) continue;
+        u64 region_end = memory[r].base + memory[r].length;
+        u64 candidate;
+        if (!align_up_u64(memory[r].base, alignment, &candidate)) continue;
+        while (candidate <= region_end && size <= region_end - candidate) {
+            range allocation = {candidate, size};
+            u64 next = candidate;
+            for (u32 i = 0; i < blocked_count; ++i) {
+                if (!blocked[i].length || blocked[i].base > ~0ULL - blocked[i].length ||
+                    !overlaps(allocation, blocked[i])) continue;
+                u64 end = blocked[i].base + blocked[i].length;
+                if (end > next) next = end;
+            }
+            if (next == candidate) { *base = candidate; return 1; }
+            if (!align_up_u64(next, alignment, &candidate)) break;
+        }
+    }
+    return 0;
+}
+
 static int page_aligned_range(range input, range *output) {
     if (!input.length || input.base > ~0ULL - input.length) return 0;
     u64 end = input.base + input.length;
@@ -621,85 +665,90 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *catalog, u64 catalog_size,
     range physical_page_ranges[MAX_PHDRS], virtual_page_ranges[MAX_PHDRS];
     struct byter_aarch64_load_segment page_table_segments[MAX_PHDRS];
     u32 segment_count = 0;
-    u64 low = ~0ULL, high = 0, virtual_low = ~0ULL, total_mem = 0;
-    u64 load_bias = 0;
+    u64 low = 0, virtual_low = ~0ULL, virtual_high = 0, total_mem = 0;
+    u64 load_alignment = 0x1000;
     int entry_ok = 0;
     for (u32 i = 0; i < eh->phnum; ++i) {
         elf_program *p = &ph[i];
         if (p->type != 1 || !p->memsz) continue;
         if (p->filesz > p->memsz || p->offset > elf_size || p->filesz > elf_size - p->offset ||
-            p->paddr > ~0ULL - p->memsz || p->vaddr < p->paddr || p->vaddr > ~0ULL - p->memsz ||
-            p->memsz > MAX_ELF_MEMORY - total_mem ||
-            (p->align > 1 && ((p->align & (p->align - 1)) || ((p->vaddr - p->offset) & (p->align - 1))))) return 0;
-        range r = {p->paddr, p->memsz}, vr = {p->vaddr, p->memsz};
-        range physical_page, virtual_page;
-        if ((p->paddr & 0xfff) != (p->vaddr & 0xfff) ||
-            !page_aligned_range(r, &physical_page) || !page_aligned_range(vr, &virtual_page) ||
-            p->vaddr < 0xffffffff80000000ULL || !in_memory(memory, memory_count, r) ||
-            !in_memory(memory, memory_count, (range){(u64)shim, shim_size}) ||
-            !in_memory(memory, memory_count, (range){(u64)dtb, dtb_size}) ||
-            overlaps(r, (range){(u64)shim, shim_size}) ||
-            overlaps(r, (range){(u64)dtb, dtb_size})) return 0;
-        u64 segment_bias = p->vaddr - p->paddr;
-        if (segment_count && segment_bias != load_bias) return 0;
-        load_bias = segment_bias;
-        for (u32 j = 0; j < reserved_count; ++j)
-            if (overlaps(physical_page, reserved_pages[j])) return 0;
+            p->vaddr > ~0ULL - p->memsz || p->memsz > MAX_ELF_MEMORY - total_mem ||
+            (p->align > 1 && ((p->align & (p->align - 1)) ||
+             ((p->vaddr - p->offset) & (p->align - 1))))) return 0;
+        if (p->align > load_alignment) load_alignment = p->align;
+        range vr = {p->vaddr, p->memsz};
+        range virtual_page;
+        if (!page_aligned_range(vr, &virtual_page) || p->vaddr < 0xffffffff80000000ULL)
+            return 0;
         for (u32 j = 0; j < segment_count; ++j)
-            if (overlaps(physical_page, physical_page_ranges[j]) ||
-                overlaps(virtual_page, virtual_page_ranges[j])) return 0;
-        segments[segment_count] = r;
+            if (overlaps(virtual_page, virtual_page_ranges[j])) return 0;
+        segments[segment_count] = (range){0, 0};
         virtual_segments[segment_count] = vr;
-        physical_page_ranges[segment_count] = physical_page;
+        physical_page_ranges[segment_count] = (range){0, virtual_page.length};
         virtual_page_ranges[segment_count] = virtual_page;
-        page_table_segments[segment_count] = (struct byter_aarch64_load_segment){
-            .physical_base = p->paddr, .virtual_base = p->vaddr,
-            .length = p->memsz, .flags = p->flags
-        };
         ++segment_count;
         total_mem += p->memsz;
-        if (r.base < low) low = r.base;
-        if (r.base + r.length > high) high = r.base + r.length;
-        if (vr.base < virtual_low) virtual_low = vr.base;
-        if ((p->flags & 1) && eh->entry >= vr.base && eh->entry - vr.base < vr.length) entry_ok = 1;
+        if (virtual_page.base < virtual_low) virtual_low = virtual_page.base;
+        if (virtual_page.base + virtual_page.length > virtual_high)
+            virtual_high = virtual_page.base + virtual_page.length;
+        if ((p->flags & 1) && eh->entry >= vr.base && eh->entry - vr.base < vr.length)
+            entry_ok = 1;
     }
-    if (!segment_count || !entry_ok || high <= low) return 0;
+    if (!segment_count || !entry_ok || virtual_high <= virtual_low ||
+        virtual_high - virtual_low > MAX_ELF_MEMORY) return 0;
     log_boot_stage("Kernel ELF validated");
 
-    u64 image_low = ~0ULL, image_high = 0, image_size = 0;
+    u64 image_size = virtual_high - virtual_low;
+    u64 covered_size = 0;
     for (u32 i = 0; i < segment_count; ++i) {
-        if (physical_page_ranges[i].base < image_low) image_low = physical_page_ranges[i].base;
-        if (physical_page_ranges[i].base + physical_page_ranges[i].length > image_high)
-            image_high = physical_page_ranges[i].base + physical_page_ranges[i].length;
-        if (physical_page_ranges[i].length > ~0ULL - image_size) return 0;
-        image_size += physical_page_ranges[i].length;
+        if (physical_page_ranges[i].length > ~0ULL - covered_size) return 0;
+        covered_size += physical_page_ranges[i].length;
     }
-    if (image_high <= image_low || image_size != image_high - image_low) return 0;
+    if (covered_size != image_size) return 0;
     log_boot_stage("Kernel segments are contiguous");
-    range executable_image = {image_low, image_size};
-    if (!in_memory(memory, memory_count, executable_image)) return 0;
-    if (overlaps(executable_image, (range){(u64)shim, shim_size}) ||
-        overlaps(executable_image, (range){(u64)dtb, dtb_size})) return 0;
-    log_boot_stage("Kernel image is in RAM");
-    for (u32 i = 0; i < reserved_count; ++i)
-        if (overlaps(executable_image, reserved_pages[i])) return 0;
-    log_boot_stage("Kernel avoids reserved memory");
 
     range framebuffer_range = {framebuffer_data.address, framebuffer_data.size};
     int has_framebuffer = framebuffer_data.format_valid && framebuffer_range.length &&
         framebuffer_range.base <= ~0ULL - framebuffer_range.length;
-    if (has_framebuffer && (overlaps(framebuffer_range, (range){(u64)shim, shim_size}) ||
-        overlaps(framebuffer_range, (range){(u64)dtb, dtb_size}))) return 0;
-    if (has_framebuffer && overlaps(framebuffer_range, executable_image)) return 0;
-
-    range shim_pages, dtb_pages;
+    range shim_pages, dtb_pages, framebuffer_pages = {0};
     if (!page_aligned_range((range){(u64)shim, shim_size}, &shim_pages) ||
-        !page_aligned_range((range){(u64)dtb, dtb_size}, &dtb_pages)) return 0;
-    range framebuffer_pages = {0};
-    if (has_framebuffer && !page_aligned_range(framebuffer_range, &framebuffer_pages)) return 0;
+        !page_aligned_range((range){(u64)dtb, dtb_size}, &dtb_pages) ||
+        (has_framebuffer && !page_aligned_range(framebuffer_range, &framebuffer_pages))) return 0;
     if (has_framebuffer && (overlaps(framebuffer_pages, shim_pages) ||
-        overlaps(framebuffer_pages, dtb_pages) || overlaps(framebuffer_pages, executable_image))) return 0;
-    log_boot_stage("Kernel avoids framebuffer memory");
+                            overlaps(framebuffer_pages, dtb_pages))) return 0;
+
+    if (!find_kernel_load_base(memory, memory_count, reserved_pages, reserved_count,
+            shim_pages, dtb_pages, module_ranges, module_count, framebuffer_pages,
+            has_framebuffer, image_size, load_alignment, &low)) {
+        log_boot_stage("ERROR: no contiguous RAM range for kernel image");
+        return 0;
+    }
+    if (low > ~0ULL - image_size) return 0;
+    for (u32 i = 0; i < segment_count; ++i) {
+        segments[i] = (range){low + virtual_segments[i].base - virtual_low,
+                              virtual_segments[i].length};
+        physical_page_ranges[i] = (range){low + virtual_page_ranges[i].base - virtual_low,
+                                          virtual_page_ranges[i].length};
+        page_table_segments[i] = (struct byter_aarch64_load_segment){
+            .physical_base = low + virtual_segments[i].base - virtual_low,
+            .virtual_base = virtual_segments[i].base,
+            .length = virtual_segments[i].length,
+            .flags = 0
+        };
+    }
+    for (u32 i = 0, n = 0; i < eh->phnum; ++i) {
+        if (ph[i].type != 1 || !ph[i].memsz) continue;
+        page_table_segments[n++].flags = ph[i].flags;
+    }
+    log_boot_stage("Kernel ELF allocated in usable RAM");
+
+    range executable_image = {low, image_size};
+    if (!in_memory(memory, memory_count, executable_image) ||
+        overlaps(executable_image, shim_pages) || overlaps(executable_image, dtb_pages) ||
+        (has_framebuffer && overlaps(executable_image, framebuffer_pages))) return 0;
+    for (u32 i = 0; i < reserved_count; ++i)
+        if (overlaps(executable_image, reserved_pages[i])) return 0;
+    log_boot_stage("Kernel image is in RAM and avoids reserved memory");
 
     range usable[MAX_OUT_RANGES]; u32 usable_count = 0;
     for (u32 i = 0; i < memory_count; ++i) {
@@ -837,13 +886,14 @@ u64 byter_shim_main(u8 *shim, u8 *dtb, u8 *catalog, u64 catalog_size,
         };
         framebuffer_result = framebuffer_response;
     }
-    for (u32 i = 0; i < eh->phnum; ++i) {
+    for (u32 i = 0, segment = 0; i < eh->phnum; ++i) {
         elf_program *p = &ph[i];
         if (p->type != 1 || !p->memsz) continue;
-        u8 *dst = (u8 *)(u64)p->paddr;
+        u8 *dst = (u8 *)(u64)segments[segment].base;
         copy_bytes(dst, elf + p->offset, p->filesz);
         zero_bytes(dst + p->filesz, p->memsz - p->filesz);
-        flush_loaded_segment((range){p->paddr, p->memsz}, !!(p->flags & 1));
+        flush_loaded_segment(segments[segment], !!(p->flags & 1));
+        ++segment;
     }
     log_boot_stage("Kernel ELF loaded");
 

@@ -1,0 +1,7 @@
+#ifndef BYTER_VIRT_BUTTONS_H
+#define BYTER_VIRT_BUTTONS_H
+#define BYTER_BUTTON_VOLUME_UP   (1U << 0)
+#define BYTER_BUTTON_VOLUME_DOWN (1U << 1)
+#define BYTER_BUTTON_POWER       (1U << 2)
+#define BYTER_BUTTON_ESSENTIAL   (1U << 3)
+#endif
